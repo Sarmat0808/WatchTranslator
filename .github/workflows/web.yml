@@ -44,7 +44,7 @@ jobs:
           pip install -q torch==2.5.1 --index-url https://download.pytorch.org/whl/cpu
           pip install -q -r scripts/requirements.txt sentencepiece protobuf sacremoses "torch==2.5.1"
           for m in opus-mt-bg-en opus-mt-en-bg opus-mt-en-et opus-mt-en-el opus-mt-en-he; do
-            python -m scripts.convert --quantize --model_id Helsinki-NLP/$m
+            python -m scripts.convert --quantize --modes q8 --model_id Helsinki-NLP/$m
             mkdir -p ../converted/local/$m/onnx
             cp models/Helsinki-NLP/$m/*.json ../converted/local/$m/
             cp models/Helsinki-NLP/$m/onnx/encoder_model_quantized.onnx ../converted/local/$m/onnx/
