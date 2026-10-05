@@ -53,6 +53,13 @@ const textCases = ['ja', 'ko', 'tr', 'pl', 'th', 'pt', 'ar', 'zh', 'he', 'el', '
     { src: 'fi', tgt: 'bg', text: 'Kiitos paljon, olet todella ystävällinen.' },
   ]);
 
+const isolated = [
+  { src: 'bg', tgt: 'en', text: 'Добро утро, къде е най-близката аптека?', fresh: true },
+  { src: 'en', tgt: 'bg', text: 'Good morning, where is the nearest pharmacy?', fresh: true },
+  { src: 'en', tgt: 'et', text: 'Good morning, where is the nearest pharmacy?', fresh: true },
+  { src: 'en', tgt: 'el', text: 'Good morning, where is the nearest pharmacy?', fresh: true },
+  { src: 'en', tgt: 'he', text: 'Good morning, where is the nearest pharmacy?', fresh: true },
+];
 const report = {};
 const withTimeout = (p, ms) => Promise.race([p, new Promise((r) => setTimeout(() => r(null), ms))]);
 const log = (...a) => { console.log(...a); fs.appendFileSync(path.join(OUT, 'log.txt'), a.join(' ') + '\n'); };
@@ -69,11 +76,13 @@ async function runEngine(name, type, device) {
   await page.evaluate(() => navigator.serviceWorker && navigator.serviceWorker.ready);
   page.setDefaultTimeout(0);
 
-  const cases = name === 'chromium' ? voiceCases.concat(textCases) : voiceCases.slice(0, 4).concat(textCases.slice(0, 4));
+  const cases = name === 'chromium'
+    ? isolated.concat(voiceCases, textCases)
+    : isolated.slice(0, 2).concat(voiceCases.slice(0, 4), textCases.slice(0, 4));
   const t0 = Date.now();
   const r = { results: [] };
   for (const c of cases) {
-    const one = await withTimeout(page.evaluate((cc) => window.__selftest([cc]), c), 300000);
+    const one = await withTimeout(page.evaluate((cc) => window.__selftest([cc], { fresh: !!cc.fresh }), c), 300000);
     const x = one ? one.results[0] : { ...c, error: 'TIMEOUT 300s' };
     if (one && !r.i18n) r.i18n = one.i18n;
     log(`[${x.src}->${x.tgt}] ${x.error ? 'ERROR ' + x.error : ''}`);
@@ -82,6 +91,7 @@ async function runEngine(name, type, device) {
     log(`   translation (${x.mtMs} ms): ${x.translation}`);
     r.results.push(x);
     if (!one) break;
+    if (x.error && /ENGINE_CRASH/.test(x.error)) log('   (engine crashed — app restarts it automatically)');
   }
   log(`selftest done in ${((Date.now() - t0) / 1000).toFixed(0)}s; i18n problems: ${JSON.stringify(r.i18n)}`);
   report[name] = r;
@@ -94,6 +104,7 @@ async function runEngine(name, type, device) {
     report[name + '-accurate'] = acc;
   }
 
+  if (name === 'webkit') { await browser.close(); return; } // перезагрузка офлайн в WebKit не поддерживается тестовой средой
   // Без интернета: перезагрузка страницы и повторный перевод
   await ctx.setOffline(true);
   await page.reload();

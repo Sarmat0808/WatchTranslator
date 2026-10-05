@@ -40,20 +40,50 @@ function progressFor(reqId, label) {
   };
 }
 
+// Сколько моделей перевода держать в памяти одновременно (iPhone не любит много)
+const MAX_MT = 4;
+const lru = []; // ключи моделей перевода, от старых к новым
+
+async function dispose(key) {
+  const p = cache.get(key);
+  cache.delete(key);
+  try { const m = await p; await m.dispose(); } catch (_) {}
+}
+
 /** Загружает модель (по одной за раз — так меньше пиковая память). */
 function load(task, spec, reqId) {
   const key = spec.id + (spec.dtypeKey || '');
-  if (cache.has(key)) return cache.get(key);
-  const p = (loadChain = loadChain.then(async () => {
+  if (cache.has(key)) {
+    if (task === 'translation') {
+      const i = lru.indexOf(key);
+      if (i >= 0) {
+        lru.splice(i, 1);
+        lru.push(key);
+      }
+    }
+    return cache.get(key);
+  }
+  const p = loadChain.then(async () => {
+    if (task === 'translation') {
+      while (lru.length >= MAX_MT) await dispose(lru.shift());
+    } else {
+      // одна модель распознавания: другую выгружаем
+      for (const k of [...cache.keys()]) if (k.startsWith('onnx-community/whisper') && k !== key) await dispose(k);
+    }
     env.allowLocalModels = !!spec.local;
     env.allowRemoteModels = !spec.local;
-    const opts = { progress_callback: progressFor(reqId, spec.id), device: 'wasm' };
-    if (spec.dtype) opts.dtype = spec.dtype;
-    else opts.dtype = 'q8';
-    return pipeline(task, spec.id, opts);
-  }));
+    const opts = { progress_callback: progressFor(reqId, spec.id), device: 'wasm', dtype: spec.dtype || 'q8' };
+    const pipe = await pipeline(task, spec.id, opts);
+    if (task === 'translation') lru.push(key);
+    return pipe;
+  });
+  loadChain = p.catch(() => {}); // ошибка одной модели не ломает следующие
   cache.set(key, p);
-  p.catch(() => cache.delete(key));
+  p.catch(() => {
+    cache.delete(key);
+    const i = lru.indexOf(key);
+    if (i >= 0) lru.splice(i, 1);
+  });
   return p;
 }
 
@@ -153,6 +183,8 @@ self.onmessage = async (e) => {
       reply({ ok: true });
     }
   } catch (err) {
-    reply({ error: String(err && err.message ? err.message : err) });
+    const msg = String(err && err.message ? err.message : err);
+    // Число вместо текста — внутренняя авария движка ONNX: поток нужно перезапустить
+    reply({ error: /^\d+$/.test(msg) ? 'ENGINE_CRASH ' + msg : msg, crashed: /^\d+$/.test(msg) });
   }
 };

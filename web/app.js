@@ -41,29 +41,62 @@ const el = (tag, cls, text) => {
 };
 
 // ---------- Связь с рабочим потоком ----------
-const worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
+let worker;
 let reqSeq = 0;
 const pending = new Map();
-worker.onmessage = (e) => {
-  const m = e.data;
-  const p = pending.get(m.reqId);
-  if (!p) return;
-  if (m.type === 'progress') {
-    p.onProgress && p.onProgress(m);
-    return;
-  }
-  pending.delete(m.reqId);
-  if (m.error) p.reject(new Error(m.error));
-  else p.resolve(m);
-};
-worker.onerror = (e) => console.error('worker error', e.message);
 
-function call(cmd, data = {}, onProgress) {
+function startWorker() {
+  worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
+  worker.onmessage = (e) => {
+    const m = e.data;
+    const p = pending.get(m.reqId);
+    if (!p) return;
+    if (m.type === 'progress') {
+      p.onProgress && p.onProgress(m);
+      return;
+    }
+    pending.delete(m.reqId);
+    if (m.error) {
+      const err = new Error(m.error);
+      err.crashed = !!m.crashed;
+      p.reject(err);
+    } else p.resolve(m);
+  };
+  worker.onerror = (e) => {
+    console.error('worker error', e.message);
+    // поток упал целиком — перезапускаем, ожидающие запросы завершаем ошибкой
+    for (const [, p] of pending) {
+      const err = new Error('ENGINE_CRASH worker');
+      err.crashed = true;
+      p.reject(err);
+    }
+    pending.clear();
+    try { worker.terminate(); } catch (_) {}
+    startWorker();
+  };
+}
+startWorker();
+
+function rawCall(cmd, data, onProgress) {
   const reqId = ++reqSeq;
   return new Promise((resolve, reject) => {
     pending.set(reqId, { resolve, reject, onProgress });
-    worker.postMessage({ reqId, cmd, ...data }, data.audio ? [data.audio.buffer] : []);
+    // звук копируем, чтобы можно было повторить запрос после перезапуска
+    worker.postMessage({ reqId, cmd, ...data });
   });
+}
+
+/** Запрос к движку. Если движок аварийно остановился — перезапускаем и пробуем ещё раз. */
+async function call(cmd, data = {}, onProgress) {
+  try {
+    return await rawCall(cmd, data, onProgress);
+  } catch (e) {
+    if (!e.crashed) throw e;
+    try { worker.terminate(); } catch (_) {}
+    pending.clear();
+    startWorker();
+    return rawCall(cmd, data, onProgress);
+  }
 }
 
 // ---------- Голос ----------
@@ -519,6 +552,11 @@ if ('serviceWorker' in navigator) {
 // ---------- Самопроверка (используется автоматическими тестами) ----------
 window.__selftest = async (cases, opts = {}) => {
   const out = { i18n: checkI18n(), results: [] };
+  if (opts.fresh) {
+    try { worker.terminate(); } catch (_) {}
+    pending.clear();
+    startWorker();
+  }
   for (const c of cases) {
     const r = { ...c };
     try {
