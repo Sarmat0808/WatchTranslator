@@ -62,6 +62,10 @@ const isolated = [
   { src: 'en', tgt: 'et', text: 'Good morning, where is the nearest pharmacy?', fresh: true },
   { src: 'en', tgt: 'el', text: 'Good morning, where is the nearest pharmacy?', fresh: true },
   { src: 'en', tgt: 'he', text: 'Good morning, where is the nearest pharmacy?', fresh: true },
+  { src: 'en', tgt: 'pl', text: 'Good morning, where is the nearest pharmacy?', fresh: true },
+  { src: 'en', tgt: 'ja', text: 'Good morning, where is the nearest pharmacy?', fresh: true },
+  { src: 'en', tgt: 'tr', text: 'Good morning, where is the nearest pharmacy?', fresh: true },
+  { src: 'en', tgt: 'ko', text: 'Good morning, where is the nearest pharmacy?', fresh: true },
 ];
 const report = {};
 // Сторож: тест никогда не висит дольше 65 минут
@@ -85,6 +89,9 @@ async function runEngine(name, type, device) {
   await page.goto(URL0);
   await page.waitForFunction(() => typeof window.__selftest === 'function', null, { timeout: 60000 });
   await page.evaluate(() => navigator.serviceWorker && navigator.serviceWorker.ready);
+  await page.reload();
+  await page.waitForFunction(() => typeof window.__selftest === 'function', null, { timeout: 60000 });
+  log('controlled by SW:', await page.evaluate(() => !!navigator.serviceWorker.controller));
   page.setDefaultTimeout(0);
 
   const cases = name === 'chromium'
@@ -110,8 +117,8 @@ async function runEngine(name, type, device) {
   // Точное распознавание (только Chromium — для сравнения)
   if (name === 'chromium') {
     const acc = (await withTimeout(page.evaluate((c) => window.__selftest(c),
-      voiceCases.slice(0, 3).map((c) => ({ ...c, quality: 'accurate' }))), 900000)) || { results: [{ error: 'TIMEOUT' }] };
-    for (const x of acc.results) log(`[accurate ${x.src}] ${x.error || ''} (${x.asrLoadMs}+${x.asrRunMs} ms): ${x.heard}`);
+      voiceCases.slice(0, 3).map((c) => ({ ...c, quality: 'precise' }))), 900000)) || { results: [{ error: 'TIMEOUT' }] };
+    for (const x of acc.results) log(`[precise ${x.src}] ${x.error || ''} (${x.asrLoadMs}+${x.asrRunMs} ms): ${x.heard} => ${x.translation}`);
     report[name + '-accurate'] = acc;
   }
 

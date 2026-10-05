@@ -19,6 +19,11 @@ export const ASR_MODELS = {
     id: 'onnx-community/whisper-small',
     dtype: { encoder_model: 'q8', decoder_model_merged: 'q8' },
   },
+  // точнее, но тяжелее (кодировщик без сжатия) — проверяется в тестах
+  precise: {
+    id: 'onnx-community/whisper-small',
+    dtype: { encoder_model: 'fp32', decoder_model_merged: 'q8' },
+  },
 };
 
 const cache = new Map(); // id -> Promise<pipeline>
@@ -111,12 +116,15 @@ function cleanup(text) {
 /** Скачана ли модель (лежит ли в кэше устройства). */
 async function isCached(spec) {
   try {
-    if (spec.local) {
-      const c = await caches.open('models-v1');
-      return !!(await c.match(base + 'models/' + spec.id + '/config.json'));
-    }
     const c = await caches.open('transformers-cache');
-    return !!(await c.match(`https://huggingface.co/${spec.id}/resolve/main/config.json`));
+    if (spec.local) {
+      const key = base + 'models/' + spec.id + '/onnx/decoder_model_merged_quantized.onnx';
+      if (await c.match(key)) return true;
+      const m = await caches.open('models-v1');
+      return !!(await m.match(key));
+    }
+    const enc = spec.dtype && spec.dtype.encoder_model === 'fp32' ? 'encoder_model.onnx' : 'encoder_model_quantized.onnx';
+    return !!(await c.match(`https://huggingface.co/${spec.id}/resolve/main/onnx/${enc}`));
   } catch (_) {
     return false;
   }

@@ -8,6 +8,7 @@ on:
       - tools/build_web.mjs
       - tools/webtest.mjs
       - tools/make_test_wavs.py
+      - tools/convert_models.sh
       - .github/workflows/web.yml
 
 concurrency:
@@ -37,34 +38,21 @@ jobs:
         uses: actions/cache@v4
         with:
           path: converted
-          key: converted-v1-bg-en-en-bg-en-et-en-el-en-he
+          key: converted-v2-${{ hashFiles('tools/convert_models.sh') }}
+      - uses: actions/setup-python@v6
+        if: steps.conv.outputs.cache-hit != 'true'
+        with:
+          python-version: "3.10"
+      - name: Convert models to ONNX (quantized)
+        if: steps.conv.outputs.cache-hit != 'true'
+        timeout-minutes: 60
+        run: |
+          mkdir -p webtest-out
+          bash tools/convert_models.sh < /dev/null 2>&1 | tee webtest-out/convert.log
+          test -s converted/list.txt
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
-      - name: Convert models to ONNX (quantized)
-        if: steps.conv.outputs.cache-hit != 'true'
-        timeout-minutes: 40
-        run: |
-          set -eo pipefail
-          mkdir -p webtest-out
-          exec > >(tee -a webtest-out/convert.log) 2>&1
-          git clone -q --depth 1 --branch 3.7.6 https://github.com/huggingface/transformers.js tjs
-          cd tjs
-          # строгая проверка формы падает на объединённом декодере Marian, хотя модель рабочая — только предупреждаем
-          sed -i 's/^\(\s*\)raise e$/\1print("WARNING (ignored):", e)/' scripts/utils.py
-          grep -n "WARNING (ignored)" scripts/utils.py
-          pip install -q torch==2.5.1 --index-url https://download.pytorch.org/whl/cpu
-          pip install -q -r scripts/requirements.txt sentencepiece protobuf sacremoses "torch==2.5.1"
-          for m in opus-mt-bg-en opus-mt-en-bg opus-mt-en-et opus-mt-en-el opus-mt-en-he; do
-            python -m scripts.convert --quantize --modes q8 --model_id Helsinki-NLP/$m
-            mkdir -p ../converted/local/$m/onnx
-            cp models/Helsinki-NLP/$m/*.json ../converted/local/$m/
-            cp models/Helsinki-NLP/$m/onnx/encoder_model_quantized.onnx ../converted/local/$m/onnx/
-            cp models/Helsinki-NLP/$m/onnx/decoder_model_merged_quantized.onnx ../converted/local/$m/onnx/
-          done
-          cd ..
-          du -sh converted/local/*
-          ls -la converted/local/*/ converted/local/*/onnx
 
       # ---------- 2. Сборка сайта ----------
       - uses: actions/setup-node@v5
