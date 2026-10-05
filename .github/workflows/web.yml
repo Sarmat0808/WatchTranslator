@@ -41,7 +41,7 @@ jobs:
           exec > >(tee -a webtest-out/convert.log) 2>&1
           git clone -q --depth 1 --branch 3.7.6 https://github.com/huggingface/transformers.js tjs
           cd tjs
-          pip install -q -r scripts/requirements.txt
+          pip install -q -r scripts/requirements.txt sentencepiece protobuf sacremoses
           for m in opus-mt-bg-en opus-mt-en-bg opus-mt-en-et opus-mt-en-el opus-mt-en-he; do
             python -m scripts.convert --quantize --model_id Helsinki-NLP/$m
             mkdir -p ../converted/local/$m/onnx
