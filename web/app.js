@@ -23,7 +23,7 @@ const S = {
   b: store.get('b', null),
   autoSpeak: store.get('autoSpeak', true),
   slow: store.get('slow', false),
-  quality: store.get('quality', 'fast'),
+  quality: store.get('quality2', 'auto'),
   face: store.get('face', false),
   history: store.get('history', []),
 };
@@ -39,6 +39,13 @@ const el = (tag, cls, text) => {
   if (text !== undefined) e.textContent = text;
   return e;
 };
+
+// Языки, которые быстрая модель распознаёт плохо — для них берём точную
+const NEEDS_ACCURATE = new Set(['fi', 'bg', 'uk', 'et', 'el', 'he', 'th', 'hu', 'cs', 'ro', 'da', 'sv', 'hi', 'vi', 'id', 'ar', 'tr', 'ko']);
+function q() {
+  if (S.quality !== 'auto') return S.quality;
+  return NEEDS_ACCURATE.has(S.a) || NEEDS_ACCURATE.has(S.b) ? 'accurate' : 'fast';
+}
 
 // ---------- Связь с рабочим потоком ----------
 let worker;
@@ -167,17 +174,17 @@ let pairReady = false;
 async function refreshReady() {
   const specs = modelsForPair(S.a, S.b);
   try {
-    const r = await call('status', { specs, quality: S.quality });
+    const r = await call('status', { specs, quality: q() });
     pairReady = r.asr && r.mt.every(Boolean);
   } catch (_) {
     pairReady = false;
   }
   renderPrepare();
-  if (pairReady) call('warm', { specs, quality: S.quality }).catch(() => {});
+  if (pairReady) call('warm', { specs, quality: q() }).catch(() => {});
 }
 
 function approxMb() {
-  const asr = S.quality === 'accurate' ? 250 : 135;
+  const asr = q() === 'accurate' ? 250 : 135;
   return asr + modelsForPair(S.a, S.b).length * 75;
 }
 
@@ -191,7 +198,7 @@ async function downloadPair() {
   } catch (_) {}
   const specs = modelsForPair(S.a, S.b);
   try {
-    await call('prepare', { specs, quality: S.quality }, (p) => updateProgress(p));
+    await call('prepare', { specs, quality: q() }, (p) => updateProgress(p));
     downloading = false;
     await refreshReady();
     toast(t('readyOffline'));
@@ -373,7 +380,7 @@ async function listen(side) {
     toast(t('noSpeech'));
     return;
   }
-  await process(side, src, tgt, () => call('asr', { audio, lang: src, quality: S.quality }, updateProgress));
+  await process(side, src, tgt, () => call('asr', { audio, lang: src, quality: q() }, updateProgress));
 }
 
 async function process(side, src, tgt, getText) {
@@ -459,15 +466,15 @@ function openSettings() {
   row(t('uiLanguage'), uiSel);
   row(t('autoSpeak'), toggle(S.autoSpeak, (v) => { S.autoSpeak = v; store.set('autoSpeak', v); }));
   row(t('slowSpeech'), toggle(S.slow, (v) => { S.slow = v; store.set('slow', v); }));
-  const q = el('select');
-  for (const [v, k] of [['fast', 'fast'], ['accurate', 'accurate']]) {
+  const qs = el('select');
+  for (const [v, k] of [['auto', 'auto'], ['fast', 'fast'], ['accurate', 'accurate']]) {
     const o = el('option', null, t(k));
     o.value = v;
-    q.append(o);
+    qs.append(o);
   }
-  q.value = S.quality;
-  q.onchange = () => { S.quality = q.value; store.set('quality', q.value); refreshReady(); };
-  row(t('recognition'), q);
+  qs.value = S.quality;
+  qs.onchange = () => { S.quality = qs.value; store.set('quality2', qs.value); refreshReady(); };
+  row(t('recognition'), qs);
   row(t('faceMode'), toggle(S.face, (v) => { S.face = v; store.set('face', v); applyMode(); }));
   const clr = el('button', 'btn', t('clearHistory'));
   clr.onclick = () => { S.history = []; store.set('history', []); renderChat(); renderFace(); d.close(); };

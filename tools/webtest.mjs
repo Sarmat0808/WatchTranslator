@@ -45,6 +45,9 @@ const voiceCases = [
   { src: 'pl', tgt: 'en', wav: 'test/pl.wav' },
   { src: 'it', tgt: 'es', wav: 'test/it.wav' },
 ];
+// как в приложении: для этих языков берётся точное распознавание
+const ACC = new Set(['fi', 'bg', 'uk', 'et', 'el', 'he', 'th', 'hu', 'cs', 'ro', 'da', 'sv', 'hi', 'vi', 'id', 'ar', 'tr', 'ko']);
+for (const c of voiceCases) c.quality = ACC.has(c.src) || ACC.has(c.tgt) ? 'accurate' : 'fast';
 const textCases = ['ja', 'ko', 'tr', 'pl', 'th', 'pt', 'ar', 'zh', 'he', 'el', 'et', 'bg', 'hi', 'vi', 'ro', 'cs']
   .map((tgt) => ({ src: 'en', tgt, text: 'Good morning, where is the nearest pharmacy?' }))
   .concat([
@@ -94,7 +97,7 @@ async function runEngine(name, type, device) {
     const x = one ? one.results[0] : { ...c, error: 'TIMEOUT 300s' };
     if (one && !r.i18n) r.i18n = one.i18n;
     log(`[${x.src}->${x.tgt}] ${x.error ? 'ERROR ' + x.error : ''}`);
-    if (x.wav) log(`   heard (${x.asrLoadMs}+${x.asrRunMs} ms): ${x.heard}`);
+    if (x.wav) log(`   heard [${x.quality}] (${x.asrLoadMs}+${x.asrRunMs} ms): ${x.heard}`);
     else log(`   text: ${x.text}`);
     log(`   translation (${x.mtMs} ms): ${x.translation}`);
     r.results.push(x);
