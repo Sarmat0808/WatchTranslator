@@ -61,12 +61,20 @@ const isolated = [
   { src: 'en', tgt: 'he', text: 'Good morning, where is the nearest pharmacy?', fresh: true },
 ];
 const report = {};
+// Сторож: тест никогда не висит дольше 65 минут
+const watchdog = setTimeout(() => {
+  console.error('WATCHDOG: test took too long, exiting');
+  try { fs.writeFileSync(path.join(OUT, 'report.json'), JSON.stringify(report, null, 2)); } catch (_) {}
+  process.exit(2);
+}, 65 * 60 * 1000);
+const browsers = [];
 const withTimeout = (p, ms) => Promise.race([p, new Promise((r) => setTimeout(() => r(null), ms))]);
 const log = (...a) => { console.log(...a); fs.appendFileSync(path.join(OUT, 'log.txt'), a.join(' ') + '\n'); };
 
 async function runEngine(name, type, device) {
   log(`\n===== ${name} =====`);
   const browser = await type.launch();
+  browsers.push(browser);
   const ctx = await browser.newContext({ ...device, locale: 'ru-RU' });
   const page = await ctx.newPage();
   page.on('console', (m) => { if (m.type() === 'error') log(`[console.${m.type()}]`, m.text().slice(0, 300)); });
@@ -120,6 +128,7 @@ async function runEngine(name, type, device) {
 
 async function screenshots() {
   const browser = await webkit.launch();
+  browsers.push(browser);
   for (const [loc, tag] of [['en-US', 'en'], ['ru-RU', 'ru'], ['fi-FI', 'fi'], ['ar-SA', 'ar'], ['ja-JP', 'ja'], ['bg-BG', 'bg']]) {
     const ctx = await browser.newContext({ ...devices['iPhone 15'], locale: loc });
     const page = await ctx.newPage();
@@ -149,5 +158,10 @@ try {
   process.exitCode = 1;
 } finally {
   fs.writeFileSync(path.join(OUT, 'report.json'), JSON.stringify(report, null, 2));
+  for (const b of browsers) await Promise.race([b.close().catch(() => {}), new Promise((r) => setTimeout(r, 10000))]);
+  server.closeAllConnections?.();
   server.close();
+  clearTimeout(watchdog);
+  // Явный выход: не ждём зависших запросов браузера
+  process.exit(process.exitCode || 0);
 }

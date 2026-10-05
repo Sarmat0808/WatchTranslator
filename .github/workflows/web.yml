@@ -12,7 +12,15 @@ on:
 
 concurrency:
   group: web
-  cancel-in-progress: true
+  cancel-in-progress: false
+
+env:
+  CI: "true"
+  DEBIAN_FRONTEND: noninteractive
+  PIP_NO_INPUT: "1"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  npm_config_yes: "true"
+  HF_HUB_DISABLE_PROGRESS_BARS: "1"
 
 jobs:
   web:
@@ -35,6 +43,7 @@ jobs:
           python-version: "3.11"
       - name: Convert models to ONNX (quantized)
         if: steps.conv.outputs.cache-hit != 'true'
+        timeout-minutes: 40
         run: |
           set -eo pipefail
           mkdir -p webtest-out
@@ -62,12 +71,14 @@ jobs:
         with:
           node-version: 22
       - name: Install libraries
+        timeout-minutes: 10
         run: |
           mkdir -p tools/webbuild && cd tools/webbuild
           npm init -y > /dev/null
-          npm install --no-audit --no-fund @huggingface/transformers@3.7.6 playwright@1
+          npm install --no-audit --no-fund --no-progress @huggingface/transformers@3.7.6 playwright@1
           ls node_modules/@huggingface/transformers/dist
       - name: Build site
+        timeout-minutes: 5
         run: |
           node tools/build_web.mjs
           mkdir -p site/models
@@ -76,6 +87,7 @@ jobs:
 
       # ---------- 3. Автопроверка в движках Safari и Chrome ----------
       - name: Test voice clips
+        timeout-minutes: 15
         run: |
           pip install -q sherpa-onnx==1.13.8 numpy scipy
           mkdir -p tts
@@ -83,11 +95,17 @@ jobs:
             curl -sSL -o tts/tts-$f https://github.com/Sarmat0808/WatchTranslator/releases/download/models/tts-$f
           done
           python tools/make_test_wavs.py tts site/test
+      - name: Install test browsers
+        timeout-minutes: 15
+        working-directory: tools/webbuild
+        run: npx --yes playwright install --with-deps chromium webkit
       - name: Browser tests
+        timeout-minutes: 75
         run: |
           set -o pipefail
-          cd tools/webbuild && npx playwright install --with-deps chromium webkit && cd ../..
-          node tools/webtest.mjs 2>&1 | tee -a webtest-out/run.log
+          mkdir -p webtest-out
+          # жёсткий предел: тест сам завершается, даже если браузер завис
+          timeout --signal=KILL 70m node tools/webtest.mjs < /dev/null 2>&1 | tee -a webtest-out/run.log
       - name: Publish test report
         if: always()
         uses: softprops/action-gh-release@v2
@@ -99,8 +117,10 @@ jobs:
 
       # ---------- 4. Публикация на GitHub Pages ----------
       - name: Remove test files
+        timeout-minutes: 2
         run: rm -rf site/test
       - name: Deploy to GitHub Pages
+        timeout-minutes: 10
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}

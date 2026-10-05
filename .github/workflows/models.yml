@@ -11,9 +11,14 @@ on:
       - .github/workflows/models.yml
       - tools/voice_test.py
 
+env:
+  CI: "true"
+  PIP_NO_INPUT: "1"
+
 jobs:
   models:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     permissions:
       contents: write
     steps:
