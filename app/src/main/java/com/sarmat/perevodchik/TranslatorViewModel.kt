@@ -15,7 +15,10 @@ import com.google.mlkit.nl.translate.TranslateRemoteModel
 import com.google.mlkit.nl.translate.Translation
 import com.google.mlkit.nl.translate.Translator
 import com.google.mlkit.nl.translate.TranslatorOptions
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.tasks.await
 import org.json.JSONArray
 import org.json.JSONObject
@@ -46,6 +49,40 @@ class TranslatorViewModel(app: Application) : AndroidViewModel(app), TextToSpeec
     var missingVoice by mutableStateOf<String?>(null)
         private set
 
+    var voiceId by mutableStateOf(prefs.getInt("voiceId", 0))
+        private set
+    var useOfflineVoice by mutableStateOf(prefs.getBoolean("offlineVoice", true))
+        private set
+
+    // Офлайн-пакеты голоса и микрофона
+    var ttsInstalled by mutableStateOf(VoicePack.TTS.isInstalled(app))
+        private set
+    var asrInstalled by mutableStateOf(VoicePack.ASR.isInstalled(app))
+        private set
+    var ttsProgress by mutableStateOf<Float?>(null)
+        private set
+    var asrProgress by mutableStateOf<Float?>(null)
+        private set
+    var ttsProgressText by mutableStateOf("")
+        private set
+    var asrProgressText by mutableStateOf("")
+        private set
+
+    // Запись с микрофона
+    var recording by mutableStateOf(false)
+        private set
+    var recognizing by mutableStateOf(false)
+        private set
+    var micLevel by mutableStateOf(0f)
+        private set
+    var speaking by mutableStateOf(false)
+        private set
+
+    private val offlineVoice = OfflineVoice(app)
+    private val offlineEars = OfflineEars(app)
+    private val recorder = VoiceRecorder()
+    private var listenJob: Job? = null
+
     val downloaded = mutableStateListOf<String>()
     val downloading = mutableStateListOf<String>()
     val history = mutableStateListOf<HistoryItem>()
@@ -59,6 +96,126 @@ class TranslatorViewModel(app: Application) : AndroidViewModel(app), TextToSpeec
     init {
         loadHistory()
         refreshModels()
+        if (ttsInstalled) preloadVoice()
+    }
+
+    private fun preloadVoice() {
+        viewModelScope.launch(Dispatchers.Default) {
+            runCatching { offlineVoice.load() }
+        }
+    }
+
+    // ---------- Офлайн-пакеты ----------
+
+    val anyPackDownloading get() = ttsProgress != null || asrProgress != null
+
+    fun downloadPack(pack: VoicePack) {
+        if (pack == VoicePack.TTS && ttsProgress != null) return
+        if (pack == VoicePack.ASR && asrProgress != null) return
+        val app = getApplication<Application>()
+        setPackProgress(pack, 0f, "Подключаюсь…")
+        viewModelScope.launch {
+            try {
+                var lastMb = -1L
+                VoicePackDownloader.download(app, pack) { done, total ->
+                    val mb = done / 1_048_576
+                    if (mb == lastMb) return@download
+                    lastMb = mb
+                    val all = total / 1_048_576
+                    viewModelScope.launch {
+                        setPackProgress(pack, done.toFloat() / total, "$mb из ~$all МБ")
+                    }
+                }
+                if (pack == VoicePack.TTS) {
+                    ttsInstalled = true
+                    preloadVoice()
+                } else {
+                    asrInstalled = true
+                }
+                status = "Готово: ${pack.title} работает без интернета"
+            } catch (e: Exception) {
+                status = "Не скачалось: ${pack.title}. Включите Wi‑Fi и попробуйте снова"
+            } finally {
+                setPackProgress(pack, null, "")
+            }
+        }
+    }
+
+    private fun setPackProgress(pack: VoicePack, value: Float?, text: String) {
+        if (pack == VoicePack.TTS) {
+            ttsProgress = value
+            ttsProgressText = text
+        } else {
+            asrProgress = value
+            asrProgressText = text
+        }
+    }
+
+    fun deletePack(pack: VoicePack) {
+        val app = getApplication<Application>()
+        if (pack == VoicePack.TTS) {
+            offlineVoice.release()
+            pack.delete(app)
+            ttsInstalled = false
+        } else {
+            offlineEars.release()
+            pack.delete(app)
+            asrInstalled = false
+        }
+        status = "Удалено: ${pack.title}"
+    }
+
+    // ---------- Офлайн-микрофон ----------
+
+    fun canListenOffline() = asrInstalled && offlineEars.supports(source)
+
+    fun startListening() {
+        if (recording || recognizing) return
+        offlineVoice.stop()
+        if (tts.isSpeaking) tts.stop()
+        val lang = source
+        status = null
+        recording = true
+        micLevel = 0f
+        listenJob = viewModelScope.launch {
+            try {
+                val audio = withContext(Dispatchers.IO) {
+                    recorder.record { lvl -> micLevel = lvl }
+                }
+                recording = false
+                if (audio.size < OfflineEars.RATE / 3) {
+                    status = "Не услышал речь. Попробуйте ближе к часам"
+                    return@launch
+                }
+                recognizing = true
+                val text = withContext(Dispatchers.Default) {
+                    offlineEars.recognize(audio, lang)
+                }
+                recognizing = false
+                if (text.isBlank()) {
+                    status = "Не разобрал. Скажите ещё раз или используйте «Написать»"
+                } else {
+                    translate(text)
+                }
+            } catch (e: Exception) {
+                status = "Ошибка микрофона: ${e.localizedMessage ?: ""}"
+            } finally {
+                recording = false
+                recognizing = false
+                micLevel = 0f
+            }
+        }
+    }
+
+    /** Закончить запись досрочно (кнопка «Готово»). */
+    fun finishListening() {
+        recorder.stopRequested = true
+    }
+
+    fun cancelListening() {
+        listenJob?.cancel()
+        recording = false
+        recognizing = false
     }
 
     // ---------- Языки ----------
@@ -192,6 +349,46 @@ class TranslatorViewModel(app: Application) : AndroidViewModel(app), TextToSpeec
     }
 
     fun speak(text: String, code: String) {
+        if (useOfflineVoice && ttsInstalled && offlineVoice.supports(code)) {
+            viewModelScope.launch {
+                speaking = true
+                missingVoice = null
+                try {
+                    withContext(Dispatchers.Default) {
+                        offlineVoice.speak(text, code, voiceId, if (slowSpeech) 0.8f else 1.0f)
+                    }
+                } catch (e: Exception) {
+                    systemSpeak(text, code)
+                } finally {
+                    speaking = false
+                }
+            }
+            return
+        }
+        systemSpeak(text, code)
+    }
+
+    fun nextVoice() {
+        voiceId = (voiceId + 1) % OfflineVoice.VOICES
+        prefs.edit().putInt("voiceId", voiceId).apply()
+        val sample = if (outputText.isNotEmpty()) outputText else when (target) {
+            "fi" -> "Hei, tämä on uusi ääni."
+            "bg" -> "Здравей, това е новият глас."
+            "ru" -> "Привет, это новый голос."
+            else -> "Hello, this is the new voice."
+        }
+        speak(sample, if (outputText.isNotEmpty()) outputLang else target)
+    }
+
+    fun toggleOfflineVoice() {
+        useOfflineVoice = !useOfflineVoice
+        prefs.edit().putBoolean("offlineVoice", useOfflineVoice).apply()
+    }
+
+    fun offlineVoiceSupports(code: String) = offlineVoice.supports(code)
+    fun offlineEarsSupports(code: String) = offlineEars.supports(code)
+
+    private fun systemSpeak(text: String, code: String) {
         if (!ttsReady) {
             status = "Голос ещё загружается, нажмите 🔊 через секунду"
             return
@@ -199,7 +396,10 @@ class TranslatorViewModel(app: Application) : AndroidViewModel(app), TextToSpeec
         val r = tts.setLanguage(Languages.ttsLocale(code))
         if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) {
             missingVoice = code
-            status = "Нет голоса для языка: ${Languages.name(code)}"
+            status = if (offlineVoice.supports(code) && !ttsInstalled)
+                "Нет голоса для языка: ${Languages.name(code)}. Скачайте «Офлайн голос» в «Языки офлайн»"
+            else
+                "Нет голоса для языка: ${Languages.name(code)}"
             return
         }
         missingVoice = null
@@ -266,6 +466,9 @@ class TranslatorViewModel(app: Application) : AndroidViewModel(app), TextToSpeec
 
     override fun onCleared() {
         translators.values.forEach { it.close() }
+        recorder.stopRequested = true
+        offlineVoice.release()
+        offlineEars.release()
         tts.stop()
         tts.shutdown()
         super.onCleared()

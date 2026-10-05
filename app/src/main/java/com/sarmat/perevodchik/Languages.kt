@@ -6,7 +6,10 @@ import java.util.Locale
 object Languages {
 
     /** Главные языки — показываются первыми. */
-    val featured = listOf("ru", "fi", "bg", "en", "uk", "et", "sv", "de")
+    val featured = listOf(
+        "ru", "fi", "bg", "en", "uk", "et", "sv", "de", "es", "fr", "it", "pt",
+        "pl", "tr", "ar", "zh", "ja", "ko", "hi", "nl", "el", "ro", "cs", "lt", "lv"
+    )
 
     private val names = mapOf(
         "ru" to "Русский", "fi" to "Финский", "bg" to "Болгарский", "en" to "Английский",

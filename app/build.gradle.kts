@@ -12,15 +12,28 @@ android {
         applicationId = "com.sarmat.perevodchik"
         minSdk = 30
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "2.0"
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        }
+    }
+
+    // Постоянный ключ: новые версии ставятся поверх старой без удаления
+    // (и без потери скачанных голосовых пакетов).
+    signingConfigs {
+        create("stable") {
+            storeFile = file("perevodchik.keystore")
+            storePassword = "perevodchik"
+            keyAlias = "perevodchik"
+            keyPassword = "perevodchik"
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
-            // Подписано отладочным ключом — подходит для установки на свои часы
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("stable")
         }
     }
     compileOptions {
@@ -36,6 +49,9 @@ android {
 }
 
 dependencies {
+    // Офлайн-речь: sherpa-onnx (скачивается при сборке в app/libs)
+    implementation(files("libs/sherpa-onnx.aar"))
+    implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.activity:activity-compose:1.9.3")
     implementation("androidx.wear.compose:compose-material:1.4.0")
     implementation("androidx.wear.compose:compose-foundation:1.4.0")

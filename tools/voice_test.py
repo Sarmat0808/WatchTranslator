@@ -5,7 +5,9 @@ import numpy as np
 import sherpa_onnx
 
 T = "sherpa-onnx-supertonic-3-tts-int8-2026-05-11"
-W = "sherpa-onnx-whisper-base"
+import sys
+W = sys.argv[1] if len(sys.argv) > 1 else "sherpa-onnx-whisper-base"
+P = W.split("-")[-1]
 
 tts = sherpa_onnx.OfflineTts(
     sherpa_onnx.OfflineTtsConfig(
@@ -23,6 +25,7 @@ tts = sherpa_onnx.OfflineTts(
         )
     )
 )
+print("ASR model:", W)
 print("TTS sample rate:", tts.sample_rate, "speakers:", tts.num_speakers)
 
 phrases = {
@@ -38,9 +41,9 @@ phrases = {
 
 for lang, text in phrases.items():
     rec = sherpa_onnx.OfflineRecognizer.from_whisper(
-        encoder=f"{W}/base-encoder.int8.onnx",
-        decoder=f"{W}/base-decoder.int8.onnx",
-        tokens=f"{W}/base-tokens.txt",
+        encoder=f"{W}/{P}-encoder.int8.onnx",
+        decoder=f"{W}/{P}-decoder.int8.onnx",
+        tokens=f"{W}/{P}-tokens.txt",
         language=lang,
         task="transcribe",
         num_threads=2,
@@ -54,11 +57,11 @@ for lang, text in phrases.items():
     audio = tts.generate(text, cfg)
     t1 = time.time()
     samples = np.array(audio.samples, dtype=np.float32)
-    # Whisper ждёт 16 кГц: простое пересэмплирование
-    n16 = int(len(samples) * 16000 / audio.sample_rate)
-    s16 = np.interp(
-        np.linspace(0, len(samples) - 1, n16), np.arange(len(samples)), samples
-    ).astype(np.float32)
+    # Whisper ждёт 16 кГц
+    from math import gcd
+    from scipy.signal import resample_poly
+    g = gcd(16000, audio.sample_rate)
+    s16 = resample_poly(samples, 16000 // g, audio.sample_rate // g).astype(np.float32)
     stream = rec.create_stream()
     stream.accept_waveform(16000, s16)
     t2 = time.time()

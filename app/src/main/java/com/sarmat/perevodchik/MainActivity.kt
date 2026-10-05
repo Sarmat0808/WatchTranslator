@@ -1,6 +1,9 @@
 package com.sarmat.perevodchik
 
+import android.Manifest
 import android.app.Activity
+import android.content.pm.PackageManager
+import android.view.WindowManager
 import android.app.RemoteInput
 import android.content.ActivityNotFoundException
 import android.content.Intent
@@ -12,7 +15,12 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -21,6 +29,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -66,18 +76,21 @@ class MainActivity : ComponentActivity() {
 fun App(vm: TranslatorViewModel = viewModel()) {
     MaterialTheme {
         val nav = rememberSwipeDismissableNavController()
+        KeepScreenOn(vm.anyPackDownloading || vm.recording || vm.recognizing)
         SwipeDismissableNavHost(navController = nav, startDestination = "main") {
             composable("main") {
                 MainScreen(
                     vm = vm,
                     onPick = { forSource -> nav.navigate(if (forSource) "pick_src" else "pick_tgt") },
                     onModels = { nav.navigate("models") },
-                    onHistory = { nav.navigate("history") }
+                    onHistory = { nav.navigate("history") },
+                    onListen = { nav.navigate("listen") }
                 )
             }
             composable("pick_src") { PickScreen(vm, forSource = true) { nav.popBackStack() } }
             composable("pick_tgt") { PickScreen(vm, forSource = false) { nav.popBackStack() } }
             composable("models") { ModelsScreen(vm) }
+            composable("listen") { ListenScreen(vm) { nav.popBackStack() } }
             composable("history") { HistoryScreen(vm) { nav.popBackStack() } }
         }
     }
@@ -106,9 +119,21 @@ fun MainScreen(
     vm: TranslatorViewModel,
     onPick: (Boolean) -> Unit,
     onModels: () -> Unit,
-    onHistory: () -> Unit
+    onHistory: () -> Unit,
+    onListen: () -> Unit
 ) {
     val context = LocalContext.current
+
+    val micPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            vm.startListening()
+            onListen()
+        } else {
+            vm.status = "Нужно разрешение на микрофон"
+        }
+    }
 
     val voiceLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -128,7 +153,7 @@ fun MainScreen(
         }
     }
 
-    fun startVoice() {
+    fun startSystemVoice() {
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, Languages.speechTag(vm.source))
@@ -140,6 +165,22 @@ fun MainScreen(
         } catch (e: ActivityNotFoundException) {
             vm.status = "Распознавание речи недоступно — используйте «Написать»"
         }
+    }
+
+    fun startVoice() {
+        if (vm.canListenOffline()) {
+            val granted = ContextCompat.checkSelfPermission(
+                context, Manifest.permission.RECORD_AUDIO
+            ) == PackageManager.PERMISSION_GRANTED
+            if (granted) {
+                vm.startListening()
+                onListen()
+            } else {
+                micPermission.launch(Manifest.permission.RECORD_AUDIO)
+            }
+            return
+        }
+        startSystemVoice()
     }
 
     fun startKeyboard() {
@@ -211,6 +252,26 @@ fun MainScreen(
             )
         }
 
+        if (!vm.ttsInstalled || !vm.asrInstalled) {
+            item {
+                Chip(
+                    onClick = onModels,
+                    label = { Text("Голос без интернета") },
+                    secondaryLabel = {
+                        Text(
+                            when {
+                                !vm.ttsInstalled && !vm.asrInstalled -> "Скачать голос и микрофон"
+                                !vm.ttsInstalled -> "Скачать офлайн голос"
+                                else -> "Скачать офлайн микрофон"
+                            }
+                        )
+                    },
+                    icon = { Text("📥", fontSize = 18.sp) },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+
         if (!vm.isReady(vm.source) || !vm.isReady(vm.target)) {
             item {
                 Chip(
@@ -226,7 +287,7 @@ fun MainScreen(
             }
         }
 
-        if (vm.busy) {
+        if (vm.busy || vm.speaking) {
             item { CircularProgressIndicator(modifier = Modifier.size(32.dp)) }
         }
 
@@ -314,6 +375,30 @@ fun MainScreen(
                 modifier = Modifier.fillMaxWidth()
             )
         }
+        if (vm.ttsInstalled) {
+            item {
+                Chip(
+                    onClick = { vm.toggleOfflineVoice() },
+                    label = { Text("Офлайн голос") },
+                    secondaryLabel = { Text(if (vm.useOfflineVoice) "Вкл" else "Выкл (голос часов)") },
+                    icon = { Text("🗣", fontSize = 16.sp) },
+                    colors = ChipDefaults.secondaryChipColors(),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+            if (vm.useOfflineVoice) {
+                item {
+                    Chip(
+                        onClick = { vm.nextVoice() },
+                        label = { Text("Голос №${vm.voiceId + 1}") },
+                        secondaryLabel = { Text("Нажмите — следующий") },
+                        icon = { Text("🎙", fontSize = 16.sp) },
+                        colors = ChipDefaults.secondaryChipColors(),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+        }
         item {
             Chip(
                 onClick = onHistory,
@@ -371,7 +456,17 @@ fun PickScreen(vm: TranslatorViewModel, forSource: Boolean, onDone: () -> Unit) 
 fun ModelsScreen(vm: TranslatorViewModel) {
     var confirmDelete by remember { mutableStateOf<String?>(null) }
     ListScreen {
-        item { Text("Языки офлайн", fontWeight = FontWeight.Bold) }
+        item { Text("Голос офлайн", fontWeight = FontWeight.Bold) }
+        item { PackChip(vm, VoicePack.TTS, "Озвучка, 31 язык") }
+        item { PackChip(vm, VoicePack.ASR, "Распознавание речи, ~60 языков") }
+        item {
+            Text(
+                "Скачиваются один раз по Wi‑Fi. Держите часы на зарядке.",
+                fontSize = 11.sp, color = Color.Gray, textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 10.dp)
+            )
+        }
+        item { Text("Языки перевода", fontWeight = FontWeight.Bold) }
         item {
             Chip(
                 onClick = { listOf("ru", "fi", "bg").forEach { vm.download(it) } },
@@ -450,6 +545,109 @@ fun HistoryScreen(vm: TranslatorViewModel, onDone: () -> Unit) {
                     onClick = { vm.clearHistory() },
                     label = { Text("Очистить") }
                 )
+            }
+        }
+    }
+}
+
+
+@Composable
+fun KeepScreenOn(on: Boolean) {
+    val activity = LocalContext.current as? Activity ?: return
+    DisposableEffect(on) {
+        if (on) activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        else activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        onDispose {
+            activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
+}
+
+@Composable
+fun PackChip(vm: TranslatorViewModel, pack: VoicePack, what: String) {
+    var confirmDelete by remember { mutableStateOf(false) }
+    val installed = if (pack == VoicePack.TTS) vm.ttsInstalled else vm.asrInstalled
+    val progress = if (pack == VoicePack.TTS) vm.ttsProgress else vm.asrProgress
+    val progressText = if (pack == VoicePack.TTS) vm.ttsProgressText else vm.asrProgressText
+    Chip(
+        onClick = {
+            when {
+                progress != null -> Unit
+                !installed -> vm.downloadPack(pack)
+                confirmDelete -> {
+                    vm.deletePack(pack)
+                    confirmDelete = false
+                }
+                else -> confirmDelete = true
+            }
+        },
+        label = { Text(pack.title) },
+        secondaryLabel = {
+            Text(
+                when {
+                    progress != null -> "⏳ ${(progress * 100).toInt()}% · $progressText"
+                    confirmDelete -> "Нажмите ещё раз — удалить"
+                    installed -> "✓ $what"
+                    else -> "⬇ $what · ~${pack.approxMb} МБ"
+                },
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+        },
+        icon = { Text(if (pack == VoicePack.TTS) "🔊" else "🎤", fontSize = 18.sp) },
+        colors = if (installed) ChipDefaults.primaryChipColors() else ChipDefaults.secondaryChipColors(),
+        modifier = Modifier.fillMaxWidth()
+    )
+}
+
+/** Экран записи: говорите, часы сами поймут, когда вы закончили. */
+@Composable
+fun ListenScreen(vm: TranslatorViewModel, onDone: () -> Unit) {
+    LaunchedEffect(vm.recording, vm.recognizing) {
+        if (!vm.recording && !vm.recognizing) onDone()
+    }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black),
+        contentAlignment = Alignment.Center
+    ) {
+        androidx.compose.foundation.layout.Column(
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                if (vm.recognizing) "Распознаю…" else "Говорите",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Text(Languages.name(vm.source), fontSize = 13.sp, color = Color.LightGray)
+            Spacer(Modifier.size(10.dp))
+            if (vm.recognizing) {
+                CircularProgressIndicator(modifier = Modifier.size(56.dp))
+            } else {
+                val d = (56 + 50 * vm.micLevel).dp
+                Box(
+                    modifier = Modifier
+                        .size(d)
+                        .clip(CircleShape)
+                        .background(Color(0xFFE53935)),
+                    contentAlignment = Alignment.Center
+                ) { Text("🎤", fontSize = 26.sp) }
+            }
+            Spacer(Modifier.size(10.dp))
+            if (vm.recording) {
+                Row {
+                    CompactChip(
+                        onClick = { vm.cancelListening() },
+                        label = { Text("Отмена") },
+                        colors = ChipDefaults.secondaryChipColors()
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    CompactChip(
+                        onClick = { vm.finishListening() },
+                        label = { Text("Готово") }
+                    )
+                }
             }
         }
     }
