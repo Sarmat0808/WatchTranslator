@@ -1,0 +1,51 @@
+name: Voice packs
+
+# Скачивает офлайн-модели голоса (Supertonic-3, 31 язык) и распознавания речи
+# (Whisper base, ~99 языков), проверяет их и выкладывает в релиз "models",
+# откуда приложение на часах скачивает их по Wi‑Fi.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/models.yml
+      - tools/voice_test.py
+
+jobs:
+  models:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Download models
+        run: |
+          set -e
+          base=https://github.com/k2-fsa/sherpa-onnx/releases/download
+          curl -sSL -o st.tar.bz2 $base/tts-models/sherpa-onnx-supertonic-3-tts-int8-2026-05-11.tar.bz2
+          curl -sSL -o wb.tar.bz2 $base/asr-models/sherpa-onnx-whisper-base.tar.bz2
+          tar xjf st.tar.bz2
+          tar xjf wb.tar.bz2
+          mkdir -p out
+          T=sherpa-onnx-supertonic-3-tts-int8-2026-05-11
+          W=sherpa-onnx-whisper-base
+          for f in duration_predictor.int8.onnx text_encoder.int8.onnx vector_estimator.int8.onnx vocoder.int8.onnx tts.json unicode_indexer.bin voice.bin; do
+            cp $T/$f out/tts-$f
+          done
+          cp $W/base-encoder.int8.onnx out/asr-base-encoder.int8.onnx
+          cp $W/base-decoder.int8.onnx out/asr-base-decoder.int8.onnx
+          cp $W/base-tokens.txt out/asr-base-tokens.txt
+          ls -l out
+      - name: Round-trip test (TTS -> ASR)
+        run: |
+          pip install sherpa-onnx==1.13.8 numpy
+          python tools/voice_test.py | tee out/voice-test-report.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: models
+          name: Голосовые пакеты (офлайн)
+          make_latest: false
+          files: out/*
