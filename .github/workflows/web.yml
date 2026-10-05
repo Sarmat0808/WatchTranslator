@@ -108,10 +108,28 @@ jobs:
         timeout-minutes: 2
         run: rm -rf site/test
       - name: Deploy to GitHub Pages
-        timeout-minutes: 10
-        uses: peaceiris/actions-gh-pages@v4
+        timeout-minutes: 30
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -o pipefail
+          mkdir -p webtest-out
+          {
+            echo "Files over 50 MB:"; find site -type f -size +50M -exec ls -la {} \;
+            du -sh site
+            cd site
+            git init -q -b gh-pages
+            git config user.name "github-actions"
+            git config user.email "github-actions@users.noreply.github.com"
+            git config http.postBuffer 1048576000
+            git add -A
+            git commit -q -m "Publish web app"
+            git push -f "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gh-pages
+          } < /dev/null 2>&1 | tee webtest-out/deploy.log
+      - name: Publish deploy log
+        if: always()
+        uses: softprops/action-gh-release@v2
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./site
-          force_orphan: true
-          commit_message: "Publish web app"
+          tag_name: web-test
+          make_latest: false
+          files: webtest-out/deploy.log
