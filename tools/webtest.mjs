@@ -54,6 +54,7 @@ const textCases = ['ja', 'ko', 'tr', 'pl', 'th', 'pt', 'ar', 'zh', 'he', 'el', '
   ]);
 
 const report = {};
+const withTimeout = (p, ms) => Promise.race([p, new Promise((r) => setTimeout(() => r(null), ms))]);
 const log = (...a) => { console.log(...a); fs.appendFileSync(path.join(OUT, 'log.txt'), a.join(' ') + '\n'); };
 
 async function runEngine(name, type, device) {
@@ -70,20 +71,25 @@ async function runEngine(name, type, device) {
 
   const cases = name === 'chromium' ? voiceCases.concat(textCases) : voiceCases.slice(0, 4).concat(textCases.slice(0, 4));
   const t0 = Date.now();
-  const r = await page.evaluate((c) => window.__selftest(c), cases);
-  log(`selftest done in ${((Date.now() - t0) / 1000).toFixed(0)}s; i18n problems: ${JSON.stringify(r.i18n)}`);
-  for (const x of r.results) {
+  const r = { results: [] };
+  for (const c of cases) {
+    const one = await withTimeout(page.evaluate((cc) => window.__selftest([cc]), c), 300000);
+    const x = one ? one.results[0] : { ...c, error: 'TIMEOUT 300s' };
+    if (one && !r.i18n) r.i18n = one.i18n;
     log(`[${x.src}->${x.tgt}] ${x.error ? 'ERROR ' + x.error : ''}`);
     if (x.wav) log(`   heard (${x.asrLoadMs}+${x.asrRunMs} ms): ${x.heard}`);
     else log(`   text: ${x.text}`);
     log(`   translation (${x.mtMs} ms): ${x.translation}`);
+    r.results.push(x);
+    if (!one) break;
   }
+  log(`selftest done in ${((Date.now() - t0) / 1000).toFixed(0)}s; i18n problems: ${JSON.stringify(r.i18n)}`);
   report[name] = r;
 
   // Точное распознавание (только Chromium — для сравнения)
   if (name === 'chromium') {
-    const acc = await page.evaluate((c) => window.__selftest(c),
-      voiceCases.slice(0, 3).map((c) => ({ ...c, quality: 'accurate' })));
+    const acc = (await withTimeout(page.evaluate((c) => window.__selftest(c),
+      voiceCases.slice(0, 3).map((c) => ({ ...c, quality: 'accurate' }))), 900000)) || { results: [{ error: 'TIMEOUT' }] };
     for (const x of acc.results) log(`[accurate ${x.src}] ${x.error || ''} (${x.asrLoadMs}+${x.asrRunMs} ms): ${x.heard}`);
     report[name + '-accurate'] = acc;
   }
@@ -92,7 +98,7 @@ async function runEngine(name, type, device) {
   await ctx.setOffline(true);
   await page.reload();
   await page.waitForFunction(() => typeof window.__selftest === 'function', null, { timeout: 60000 });
-  const off = await page.evaluate((c) => window.__selftest(c), [voiceCases[0], voiceCases[1], voiceCases[2]]);
+  const off = (await withTimeout(page.evaluate((c) => window.__selftest(c), [voiceCases[0], voiceCases[1], voiceCases[2]]), 600000)) || { results: [{ error: 'TIMEOUT' }] };
   for (const x of off.results) log(`[OFFLINE ${x.src}->${x.tgt}] ${x.error || 'ok'} | ${x.heard} => ${x.translation}`);
   report[name + '-offline'] = off;
   const st = await page.evaluate(() => window.__status('ru', 'fi'));
