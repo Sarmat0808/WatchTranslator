@@ -211,7 +211,22 @@ class OfflineEars(
             "Редактор субтитров", "Kiitos katsomisesta"
         )
         if (junk.any { t.startsWith(it, ignoreCase = true) }) return ""
-        return t
+        return removeRepeats(t)
+    }
+
+    /** Whisper иногда повторяет фразу дважды — оставляем один раз. */
+    private fun removeRepeats(t: String): String {
+        val parts = Regex("(?<=[.!?…])\\s+").split(t).map { it.trim() }.filter { it.isNotEmpty() }
+        val out = ArrayList<String>()
+        for (p in parts) {
+            val key = p.lowercase().trimEnd('.', '!', '?', '…', ',')
+            val dup = out.any { prev ->
+                val k = prev.lowercase().trimEnd('.', '!', '?', '…', ',')
+                k == key || (key.length >= 8 && k.startsWith(key))
+            }
+            if (!dup) out.add(p)
+        }
+        return out.joinToString(" ")
     }
 
     fun release() {
