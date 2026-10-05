@@ -36,7 +36,9 @@ jobs:
       - name: Convert models to ONNX (quantized)
         if: steps.conv.outputs.cache-hit != 'true'
         run: |
-          set -e
+          set -eo pipefail
+          mkdir -p webtest-out
+          exec > >(tee -a webtest-out/convert.log) 2>&1
           git clone -q --depth 1 --branch 3.7.6 https://github.com/huggingface/transformers.js tjs
           cd tjs
           pip install -q -r scripts/requirements.txt
@@ -79,8 +81,9 @@ jobs:
           python tools/make_test_wavs.py tts site/test
       - name: Browser tests
         run: |
+          set -o pipefail
           cd tools/webbuild && npx playwright install --with-deps chromium webkit && cd ../..
-          node tools/webtest.mjs
+          node tools/webtest.mjs 2>&1 | tee -a webtest-out/run.log
       - name: Publish test report
         if: always()
         uses: softprops/action-gh-release@v2
