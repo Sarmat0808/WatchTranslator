@@ -66,6 +66,9 @@ const isolated = [
   { src: 'en', tgt: 'ja', text: 'Good morning, where is the nearest pharmacy?', fresh: true },
   { src: 'en', tgt: 'tr', text: 'Good morning, where is the nearest pharmacy?', fresh: true },
   { src: 'en', tgt: 'ko', text: 'Good morning, where is the nearest pharmacy?', fresh: true },
+  { src: 'ru', tgt: 'ko', text: 'Доброе утро, где ближайшая аптека?', fresh: true },
+  { src: 'fi', tgt: 'tr', text: 'Hyvää huomenta, missä on lähin apteekki?', fresh: true },
+  { src: 'en', tgt: 'th', text: 'Good morning, where is the nearest pharmacy?', fresh: true },
 ];
 const report = {};
 // Сторож: тест никогда не висит дольше 65 минут
@@ -122,17 +125,47 @@ async function runEngine(name, type, device) {
     report[name + '-accurate'] = acc;
   }
 
-  if (name === 'webkit') { await browser.close(); return; } // перезагрузка офлайн в WebKit не поддерживается тестовой средой
-  // Без интернета: перезагрузка страницы и повторный перевод
-  await ctx.setOffline(true);
+  await browser.close();
+}
+
+/** Как у реального пользователя: одна пара языков, скачали — и работаем без интернета. */
+async function runOffline(name, type, device) {
+  log(`\n===== OFFLINE ${name} =====`);
+  const browser = await type.launch();
+  browsers.push(browser);
+  const ctx = await browser.newContext({ ...device, locale: 'ru-RU' });
+  const page = await ctx.newPage();
+  page.on('pageerror', (e) => log('[pageerror]', e.message));
+  await page.goto(URL0);
+  await page.waitForFunction(() => typeof window.__selftest === 'function', null, { timeout: 60000 });
+  await page.evaluate(() => navigator.serviceWorker && navigator.serviceWorker.ready);
   await page.reload();
   await page.waitForFunction(() => typeof window.__selftest === 'function', null, { timeout: 60000 });
-  const off = (await withTimeout(page.evaluate((c) => window.__selftest(c), [voiceCases[0], voiceCases[1], voiceCases[2]]), 600000)) || { results: [{ error: 'TIMEOUT' }] };
+  page.setDefaultTimeout(0);
+  const pair = [voiceCases[0], voiceCases[1]]; // ru->fi, fi->ru (точное распознавание)
+  const on = (await withTimeout(page.evaluate((c) => window.__selftest(c), pair), 900000)) || { results: [{ error: 'TIMEOUT' }] };
+  for (const x of on.results) log(`[online ${x.src}->${x.tgt}] ${x.error || 'ok'} | ${x.heard} => ${x.translation}`);
+  const dump = () => page.evaluate(async () => {
+    const out = {};
+    for (const n of await caches.keys()) out[n] = (await (await caches.open(n)).keys()).length;
+    out.estimateMB = navigator.storage && navigator.storage.estimate ? Math.round((await navigator.storage.estimate()).usage / 1048576) : null;
+    return out;
+  });
+  log('[caches]', JSON.stringify(await dump()));
+  await ctx.setOffline(true);
+  try {
+    await page.reload();
+  } catch (e) {
+    log('reload offline failed in this engine:', e.message.split('\n')[0]);
+    await browser.close();
+    return;
+  }
+  await page.waitForFunction(() => typeof window.__selftest === 'function', null, { timeout: 60000 });
+  log('[caches offline]', JSON.stringify(await dump()));
+  log('[status offline]', JSON.stringify(await page.evaluate(() => window.__status('ru', 'fi', 'accurate'))));
+  const off = (await withTimeout(page.evaluate((c) => window.__selftest(c), pair), 600000)) || { results: [{ error: 'TIMEOUT' }] };
   for (const x of off.results) log(`[OFFLINE ${x.src}->${x.tgt}] ${x.error || 'ok'} | ${x.heard} => ${x.translation}`);
   report[name + '-offline'] = off;
-  const st = await page.evaluate(() => window.__status('ru', 'fi'));
-  log('[OFFLINE status ru/fi]', JSON.stringify(st));
-  await ctx.setOffline(false);
   await browser.close();
 }
 
@@ -163,6 +196,8 @@ try {
   await screenshots();
   await runEngine('chromium', chromium, devices['Pixel 7']);
   await runEngine('webkit', webkit, devices['iPhone 15']);
+  await runOffline('chromium', chromium, devices['Pixel 7']);
+  await runOffline('webkit', webkit, devices['iPhone 15']);
 } catch (e) {
   log('FATAL', e.stack || e);
   process.exitCode = 1;

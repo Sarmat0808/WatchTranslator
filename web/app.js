@@ -185,7 +185,7 @@ async function refreshReady() {
 
 function approxMb() {
   const asr = q() === 'accurate' ? 250 : 135;
-  return asr + modelsForPair(S.a, S.b).length * 75;
+  return asr + modelsForPair(S.a, S.b).reduce((sum, m) => sum + (m.nllb ? 650 : 110), 0);
 }
 
 let downloading = false;

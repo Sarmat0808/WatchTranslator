@@ -71,6 +71,7 @@ jobs:
           node tools/build_web.mjs
           mkdir -p site/models
           cp -r converted/local site/models/
+          rm -rf site/models/local/opus-mt-tc-big-*   # эти не заработали (другой словарь), вместо них NLLB
           du -sh site site/models site/ort site/vendor
 
       # ---------- 3. Автопроверка в движках Safari и Chrome ----------

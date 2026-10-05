@@ -138,7 +138,9 @@ async function translateText(text, src, tgt, reqId) {
     const sentences = cur.split(/(?<=[.!?…。！？])\s+/).filter((s) => s.trim());
     const outs = [];
     for (const s of sentences.length ? sentences : [cur]) {
-      const r = await t(step.prefix + s, { max_new_tokens: 256, num_beams: 2 });
+      const gen = { max_new_tokens: 256, num_beams: 2 };
+      if (step.nllb) Object.assign(gen, step.nllb, { num_beams: 1 });
+      const r = await t(step.prefix + s, gen);
       outs.push((r[0]?.translation_text || '').trim());
     }
     cur = outs.join(' ');

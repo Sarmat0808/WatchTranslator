@@ -46,18 +46,33 @@ const FROM_EN = {
   uk: X('Xenova/opus-mt-en-uk'), et: L('local/opus-mt-en-et'), sv: X('Xenova/opus-mt-en-sv'),
   de: X('Xenova/opus-mt-en-de'), es: X('Xenova/opus-mt-en-es'), fr: X('Xenova/opus-mt-en-fr'),
   it: X('Xenova/opus-mt-en-it'), pt: X('Xenova/opus-mt-en-ROMANCE', '>>pt<< '),
-  pl: L('local/opus-mt-en-sla', '>>pol<< '), tr: L('local/opus-mt-tc-big-en-tr'),
+  pl: L('local/opus-mt-en-sla', '>>pol<< '), tr: null,
   ar: X('Xenova/opus-mt-en-ar', '>>ara<< '), zh: X('Xenova/opus-mt-en-zh', '>>cmn_Hans<< '),
-  ja: L('local/opus-tatoeba-en-ja', '>>jpn<< '), ko: L('local/opus-mt-tc-big-en-ko'),
+  ja: L('local/opus-tatoeba-en-ja', '>>jpn<< '), ko: null,
   hi: X('Xenova/opus-mt-en-hi'), nl: X('Xenova/opus-mt-en-nl'), el: L('local/opus-mt-en-el'),
   ro: X('Xenova/opus-mt-en-ro'), cs: X('Xenova/opus-mt-en-cs'), da: X('Xenova/opus-mt-en-da'),
   hu: X('Xenova/opus-mt-en-hu'), vi: X('Xenova/opus-mt-en-vi'), id: X('Xenova/opus-mt-en-id'),
-  th: X('Xenova/opus-mt-en-mul', '>>tha<< '), he: L('local/opus-mt-en-he'),
+  th: null, he: L('local/opus-mt-en-he'),
 };
+
+// Для корейского, турецкого и тайского нет хорошей маленькой модели —
+// берём многоязычную NLLB-200 (переводит напрямую, без английского посредника)
+const NLLB_ID = 'Xenova/nllb-200-distilled-600M';
+const NLLB = {
+  en: 'eng_Latn', ru: 'rus_Cyrl', fi: 'fin_Latn', bg: 'bul_Cyrl', uk: 'ukr_Cyrl', et: 'est_Latn',
+  sv: 'swe_Latn', de: 'deu_Latn', es: 'spa_Latn', fr: 'fra_Latn', it: 'ita_Latn', pt: 'por_Latn',
+  pl: 'pol_Latn', tr: 'tur_Latn', ar: 'arb_Arab', zh: 'zho_Hans', ja: 'jpn_Jpan', ko: 'kor_Hang',
+  hi: 'hin_Deva', nl: 'nld_Latn', el: 'ell_Grek', ro: 'ron_Latn', cs: 'ces_Latn', da: 'dan_Latn',
+  hu: 'hun_Latn', vi: 'vie_Latn', id: 'ind_Latn', th: 'tha_Thai', he: 'heb_Hebr',
+};
+export const NLLB_TARGETS = new Set(['ko', 'tr', 'th']);
 
 /** Цепочка шагов перевода src → tgt. */
 export function route(src, tgt) {
   if (src === tgt) return [];
+  if (NLLB_TARGETS.has(tgt)) {
+    return [{ id: NLLB_ID, prefix: '', local: false, nllb: { src_lang: NLLB[src], tgt_lang: NLLB[tgt] } }];
+  }
   const d = DIRECT[`${src}>${tgt}`];
   if (d) return [d];
   if (src === 'en') return [FROM_EN[tgt]];
