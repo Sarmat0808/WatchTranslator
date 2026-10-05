@@ -13,4 +13,4 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "WatchTranslator"
-include(":app")
+include(":app", ":mobile")

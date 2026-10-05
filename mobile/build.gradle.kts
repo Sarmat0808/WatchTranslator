@@ -5,22 +5,21 @@ plugins {
 }
 
 android {
-    namespace = "com.sarmat.perevodchik"
+    namespace = "com.sarmat.perevodchik.phone"
     compileSdk = 35
 
     defaultConfig {
+        // Тот же id, что у часов: так часы и телефон находят друг друга по Bluetooth
         applicationId = "com.sarmat.perevodchik"
-        minSdk = 30
+        minSdk = 28
         targetSdk = 34
         versionCode = 3
         versionName = "3.0"
         ndk {
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+            abiFilters += listOf("arm64-v8a")
         }
     }
 
-    // Постоянный ключ: новые версии ставятся поверх старой без удаления
-    // (и без потери скачанных голосовых пакетов).
     signingConfigs {
         create("stable") {
             storeFile = rootProject.file("perevodchik.keystore")
@@ -50,14 +49,13 @@ android {
 }
 
 dependencies {
-    // Офлайн-речь: sherpa-onnx (скачивается при сборке в app/libs)
-    implementation(files("libs/sherpa-onnx.aar"))
+    implementation(files("../app/libs/sherpa-onnx.aar"))
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.activity:activity-compose:1.9.3")
-    implementation("androidx.wear.compose:compose-material:1.4.0")
-    implementation("androidx.wear.compose:compose-foundation:1.4.0")
-    implementation("androidx.wear.compose:compose-navigation:1.4.0")
-    implementation("androidx.wear:wear-input:1.1.0")
+    implementation(platform("androidx.compose:compose-bom:2024.12.01"))
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.foundation:foundation")
+    implementation("androidx.compose.material3:material3")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.7")
     implementation("com.google.mlkit:translate:17.0.3")

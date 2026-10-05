@@ -23,7 +23,7 @@ import kotlin.math.max
 import kotlin.math.sqrt
 
 /** Офлайн-голос (Supertonic-3): 31 язык, 10 голосов. */
-class OfflineVoice(private val context: Context) {
+class OfflineVoice(private val context: Context, private val threads: Int = 2) {
 
     companion object {
         val languages = setOf(
@@ -57,7 +57,7 @@ class OfflineVoice(private val context: Context) {
                         unicodeIndexer = f("tts-unicode_indexer.bin"),
                         voiceStyle = f("tts-voice.bin")
                     ),
-                    numThreads = 2
+                    numThreads = threads
                 )
             )
         )
@@ -66,7 +66,7 @@ class OfflineVoice(private val context: Context) {
     }
 
     /** Синтезирует и проигрывает фразу. Вызывать не в главном потоке. */
-    fun speak(text: String, lang: String, voice: Int, speed: Float) {
+    fun speak(text: String, lang: String, voice: Int, speed: Float, steps: Int = 5) {
         val engine = load()
         val audio = synchronized(this) {
             engine.generateWithConfig(
@@ -74,7 +74,7 @@ class OfflineVoice(private val context: Context) {
                 GenerationConfig(
                     speed = speed,
                     sid = voice.coerceIn(0, VOICES - 1),
-                    numSteps = 5,
+                    numSteps = steps,
                     extra = mapOf("lang" to lang)
                 )
             )
@@ -131,7 +131,11 @@ class OfflineVoice(private val context: Context) {
 }
 
 /** Офлайн-распознавание речи (Whisper base), ~99 языков. */
-class OfflineEars(private val context: Context) {
+class OfflineEars(
+    private val context: Context,
+    val pack: VoicePack = VoicePack.ASR,
+    private val threads: Int = 4
+) {
 
     companion object {
         val languages = setOf(
@@ -150,19 +154,20 @@ class OfflineEars(private val context: Context) {
     fun supports(code: String) = code in languages
 
     private fun config(lang: String): OfflineRecognizerConfig {
-        val p = VoicePack.ASR
+        val p = pack
+        val x = pack.asrPrefix
         return OfflineRecognizerConfig(
             modelConfig = OfflineModelConfig(
                 whisper = OfflineWhisperModelConfig(
-                    encoder = p.file(context, "asr-base-encoder.int8.onnx").absolutePath,
-                    decoder = p.file(context, "asr-base-decoder.int8.onnx").absolutePath,
+                    encoder = p.file(context, "asr-$x-encoder.int8.onnx").absolutePath,
+                    decoder = p.file(context, "asr-$x-decoder.int8.onnx").absolutePath,
                     language = lang,
                     task = "transcribe",
                     tailPaddings = 1000
                 ),
-                tokens = p.file(context, "asr-base-tokens.txt").absolutePath,
+                tokens = p.file(context, "asr-$x-tokens.txt").absolutePath,
                 modelType = "whisper",
-                numThreads = 4
+                numThreads = threads
             ),
             decodingMethod = "greedy_search"
         )

@@ -32,6 +32,9 @@ jobs:
           curl -sSL -o ws.tar.bz2 $base/asr-models/sherpa-onnx-whisper-small.tar.bz2
           tar xjf ws.tar.bz2
           ls -l sherpa-onnx-whisper-small
+          curl -sSL -o wt.tar.bz2 $base/asr-models/sherpa-onnx-whisper-turbo.tar.bz2
+          tar xjf wt.tar.bz2
+          rm -f *.tar.bz2
           mkdir -p out
           T=sherpa-onnx-supertonic-3-tts-int8-2026-05-11
           W=sherpa-onnx-whisper-base
@@ -45,12 +48,17 @@ jobs:
           cp $S/small-encoder.int8.onnx out/asr-small-encoder.int8.onnx
           cp $S/small-decoder.int8.onnx out/asr-small-decoder.int8.onnx
           cp $S/small-tokens.txt out/asr-small-tokens.txt
+          U=sherpa-onnx-whisper-turbo
+          cp $U/turbo-encoder.int8.onnx out/asr-turbo-encoder.int8.onnx
+          cp $U/turbo-decoder.int8.onnx out/asr-turbo-decoder.int8.onnx
+          cp $U/turbo-tokens.txt out/asr-turbo-tokens.txt
           ls -l out
       - name: Round-trip test (TTS -> ASR)
         run: |
           pip install sherpa-onnx==1.13.8 numpy scipy
           python tools/voice_test.py sherpa-onnx-whisper-base | tee out/voice-test-report.txt
           python tools/voice_test.py sherpa-onnx-whisper-small | tee -a out/voice-test-report.txt
+          python tools/voice_test.py sherpa-onnx-whisper-turbo | tee -a out/voice-test-report.txt
           ls -l out | tee -a out/voice-test-report.txt
       - uses: softprops/action-gh-release@v2
         with:

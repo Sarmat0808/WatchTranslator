@@ -401,6 +401,24 @@ fun MainScreen(
         }
         item {
             Chip(
+                onClick = { vm.toggleUsePhone() },
+                label = { Text("Помощь телефона") },
+                secondaryLabel = {
+                    Text(
+                        when {
+                            !vm.usePhone -> "Выкл — всё на часах"
+                            vm.phoneConnected -> "✓ Телефон рядом"
+                            else -> "Вкл · телефон не найден"
+                        }
+                    )
+                },
+                icon = { Text("📱", fontSize = 16.sp) },
+                colors = ChipDefaults.secondaryChipColors(),
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+        item {
+            Chip(
                 onClick = onHistory,
                 label = { Text("История") },
                 secondaryLabel = { Text("${vm.history.size} переводов") },

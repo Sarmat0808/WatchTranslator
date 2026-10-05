@@ -78,6 +78,13 @@ class TranslatorViewModel(app: Application) : AndroidViewModel(app), TextToSpeec
     var speaking by mutableStateOf(false)
         private set
 
+    // Телефон рядом с приложением «Переводчик»: он распознаёт и переводит за часы
+    private val phoneLink = PhoneLink(app)
+    var usePhone by mutableStateOf(prefs.getBoolean("usePhone", true))
+        private set
+    var phoneConnected by mutableStateOf(false)
+        private set
+
     private val offlineVoice = OfflineVoice(app)
     private val offlineEars = OfflineEars(app)
     private val recorder = VoiceRecorder()
@@ -97,12 +104,29 @@ class TranslatorViewModel(app: Application) : AndroidViewModel(app), TextToSpeec
         loadHistory()
         refreshModels()
         if (ttsInstalled) preloadVoice()
+        refreshPhone()
+        // Заранее загружаем распознавание, чтобы первая фраза не ждала загрузки модели
+        if (asrInstalled) viewModelScope.launch(Dispatchers.Default) {
+            runCatching { offlineEars.load(source) }
+        }
     }
 
     private fun preloadVoice() {
         viewModelScope.launch(Dispatchers.Default) {
             runCatching { offlineVoice.load() }
         }
+    }
+
+    fun refreshPhone() {
+        viewModelScope.launch {
+            phoneConnected = phoneLink.findPhone() != null
+        }
+    }
+
+    fun toggleUsePhone() {
+        usePhone = !usePhone
+        prefs.edit().putBoolean("usePhone", usePhone).apply()
+        if (usePhone) refreshPhone()
     }
 
     // ---------- Офлайн-пакеты ----------
@@ -167,7 +191,8 @@ class TranslatorViewModel(app: Application) : AndroidViewModel(app), TextToSpeec
 
     // ---------- Офлайн-микрофон ----------
 
-    fun canListenOffline() = asrInstalled && offlineEars.supports(source)
+    fun canListenOffline() =
+        (asrInstalled && offlineEars.supports(source)) || (usePhone && phoneConnected)
 
     fun startListening() {
         if (recording || recognizing) return
@@ -188,6 +213,32 @@ class TranslatorViewModel(app: Application) : AndroidViewModel(app), TextToSpeec
                     return@launch
                 }
                 recognizing = true
+                val tgt = target
+                // 1) Сначала пробуем телефон — он мощнее и точнее
+                if (usePhone) {
+                    val node = phoneLink.findPhone()
+                    phoneConnected = node != null
+                    if (node != null) {
+                        val res = runCatching {
+                            phoneLink.recognizeAndTranslate(node, audio, lang, tgt)
+                        }.getOrNull()
+                        if (res != null) {
+                            recognizing = false
+                            if (res.text.isBlank()) {
+                                status = "Не разобрал. Скажите ещё раз или используйте «Написать»"
+                            } else {
+                                showResult(lang, tgt, res.text, res.translation)
+                            }
+                            return@launch
+                        }
+                    }
+                }
+                // 2) Сами, на часах
+                if (!(asrInstalled && offlineEars.supports(lang))) {
+                    recognizing = false
+                    status = "Телефон не ответил. Скачайте «Офлайн микрофон» для часов"
+                    return@launch
+                }
                 val text = withContext(Dispatchers.Default) {
                     offlineEars.recognize(audio, lang)
                 }
@@ -205,6 +256,15 @@ class TranslatorViewModel(app: Application) : AndroidViewModel(app), TextToSpeec
                 micLevel = 0f
             }
         }
+    }
+
+    private fun showResult(src: String, tgt: String, text: String, translation: String) {
+        inputText = text
+        outputText = translation
+        outputLang = tgt
+        status = null
+        addHistory(HistoryItem(src, tgt, text, translation))
+        if (autoSpeak) speak(translation, tgt)
     }
 
     /** Закончить запись досрочно (кнопка «Готово»). */
@@ -355,7 +415,7 @@ class TranslatorViewModel(app: Application) : AndroidViewModel(app), TextToSpeec
                 missingVoice = null
                 try {
                     withContext(Dispatchers.Default) {
-                        offlineVoice.speak(text, code, voiceId, if (slowSpeech) 0.8f else 1.0f)
+                        offlineVoice.speak(text, code, voiceId, if (slowSpeech) 0.8f else 1.0f, steps = 3)
                     }
                 } catch (e: Exception) {
                     systemSpeak(text, code)

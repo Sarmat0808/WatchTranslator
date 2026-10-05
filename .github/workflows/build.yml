@@ -28,17 +28,26 @@ jobs:
           ls -l app/libs
       - name: Build
         run: |
+          set -o pipefail
           chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon
-      - uses: actions/upload-artifact@v4
+          ./gradlew :app:assembleRelease :mobile:assembleRelease --no-daemon --console=plain 2>&1 | tee build.log
+      - name: Publish build log on failure
+        if: failure()
+        uses: softprops/action-gh-release@v2
         with:
-          name: Perevodchik-APK
-          path: app/build/outputs/apk/release/*.apk
-      - name: Rename APK
-        run: cp app/build/outputs/apk/release/app-release.apk Perevodchik.apk
+          tag_name: ci-log
+          name: CI log
+          make_latest: false
+          files: build.log
+      - name: Rename APKs
+        run: |
+          cp app/build/outputs/apk/release/app-release.apk Perevodchik.apk
+          cp mobile/build/outputs/apk/release/mobile-release.apk Perevodchik-Phone.apk
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
           name: Переводчик (последняя версия)
           make_latest: true
-          files: Perevodchik.apk
+          files: |
+            Perevodchik.apk
+            Perevodchik-Phone.apk

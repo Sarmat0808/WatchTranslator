@@ -19,7 +19,9 @@ enum class VoicePack(
     val title: String,
     val dirName: String,
     val files: List<String>,
-    val approxMb: Int
+    val approxMb: Int,
+    /** Для пакетов распознавания: base / small / turbo */
+    val asrPrefix: String = ""
 ) {
     TTS(
         "Офлайн голос",
@@ -43,8 +45,33 @@ enum class VoicePack(
             "asr-base-decoder.int8.onnx",
             "asr-base-tokens.txt"
         ),
-        160
+        160,
+        "base"
+    ),
+    ASR_SMALL(
+        "Точный микрофон",
+        "asr-small",
+        listOf(
+            "asr-small-encoder.int8.onnx",
+            "asr-small-decoder.int8.onnx",
+            "asr-small-tokens.txt"
+        ),
+        358,
+        "small"
+    ),
+    ASR_TURBO(
+        "Максимальный микрофон",
+        "asr-turbo",
+        listOf(
+            "asr-turbo-encoder.int8.onnx",
+            "asr-turbo-decoder.int8.onnx",
+            "asr-turbo-tokens.txt"
+        ),
+        989,
+        "turbo"
     );
+
+    val isAsr get() = asrPrefix.isNotEmpty()
 
     fun dir(context: Context) = File(context.filesDir, dirName)
     fun file(context: Context, name: String) = File(dir(context), name)
