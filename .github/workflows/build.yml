@@ -6,6 +6,9 @@ on:
       - tools/**
       - .github/workflows/models.yml
       - README.md
+      - web/**
+      - .github/workflows/web.yml
+      - .github/workflows/probe.yml
   workflow_dispatch:
 
 jobs:

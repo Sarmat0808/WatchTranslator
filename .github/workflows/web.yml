@@ -1,0 +1,102 @@
+name: Web app (iPhone & any phone)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - web/**
+      - tools/build_web.mjs
+      - tools/webtest.mjs
+      - tools/make_test_wavs.py
+      - .github/workflows/web.yml
+
+concurrency:
+  group: web
+  cancel-in-progress: true
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      # ---------- 1. Модели перевода, которых нет готовыми (болгарский, эстонский, греческий, иврит) ----------
+      - name: Cache converted models
+        id: conv
+        uses: actions/cache@v4
+        with:
+          path: converted
+          key: converted-v1-bg-en-en-bg-en-et-en-el-en-he
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Convert models to ONNX (quantized)
+        if: steps.conv.outputs.cache-hit != 'true'
+        run: |
+          set -e
+          git clone -q --depth 1 --branch 3.7.6 https://github.com/huggingface/transformers.js tjs
+          cd tjs
+          pip install -q -r scripts/requirements.txt
+          for m in opus-mt-bg-en opus-mt-en-bg opus-mt-en-et opus-mt-en-el opus-mt-en-he; do
+            python -m scripts.convert --quantize --model_id Helsinki-NLP/$m
+            mkdir -p ../converted/local/$m/onnx
+            cp models/Helsinki-NLP/$m/*.json ../converted/local/$m/
+            cp models/Helsinki-NLP/$m/onnx/encoder_model_quantized.onnx ../converted/local/$m/onnx/
+            cp models/Helsinki-NLP/$m/onnx/decoder_model_merged_quantized.onnx ../converted/local/$m/onnx/
+          done
+          cd ..
+          du -sh converted/local/*
+          ls -la converted/local/*/ converted/local/*/onnx
+
+      # ---------- 2. Сборка сайта ----------
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Install libraries
+        run: |
+          mkdir -p tools/webbuild && cd tools/webbuild
+          npm init -y > /dev/null
+          npm install --no-audit --no-fund @huggingface/transformers@3.7.6 playwright@1
+          ls node_modules/@huggingface/transformers/dist
+      - name: Build site
+        run: |
+          node tools/build_web.mjs
+          mkdir -p site/models
+          cp -r converted/local site/models/
+          du -sh site site/models site/ort site/vendor
+
+      # ---------- 3. Автопроверка в движках Safari и Chrome ----------
+      - name: Test voice clips
+        run: |
+          pip install -q sherpa-onnx==1.13.8 numpy scipy
+          mkdir -p tts
+          for f in duration_predictor.int8.onnx text_encoder.int8.onnx vector_estimator.int8.onnx vocoder.int8.onnx tts.json unicode_indexer.bin voice.bin; do
+            curl -sSL -o tts/tts-$f https://github.com/Sarmat0808/WatchTranslator/releases/download/models/tts-$f
+          done
+          python tools/make_test_wavs.py tts site/test
+      - name: Browser tests
+        run: |
+          cd tools/webbuild && npx playwright install --with-deps chromium webkit && cd ../..
+          node tools/webtest.mjs
+      - name: Publish test report
+        if: always()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: web-test
+          name: Web test report
+          make_latest: false
+          files: webtest-out/*
+
+      # ---------- 4. Публикация на GitHub Pages ----------
+      - name: Remove test files
+        run: rm -rf site/test
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./site
+          force_orphan: true
+          commit_message: "Publish web app"
