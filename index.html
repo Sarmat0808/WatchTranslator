@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta name="theme-color" content="#0f1419" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f4f6f8" media="(prefers-color-scheme: light)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Translator">
+  <meta name="description" content="Offline voice translator: speak, translate and hear the translation without internet.">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="style.css?v=4a38890-muwn3fbk">
+  <title>Translator</title>
+</head>
+<body>
+  <div id="app">
+    <header class="top">
+      <h1 id="title">Translator</h1>
+      <button id="camBtn" class="icon" aria-label="camera">📷</button>
+      <button id="modeBtn" class="icon" aria-label="mode">👥</button>
+      <button id="setBtn" class="icon" aria-label="settings">⚙️</button>
+    </header>
+
+    <div class="langbar">
+      <label class="lang">
+        <span id="langALabel" class="lang-label">My language</span>
+        <select id="langA" class="sel a"></select>
+      </label>
+      <button id="swap" class="icon swap" aria-label="swap">⇄</button>
+      <label class="lang">
+        <span id="langBLabel" class="lang-label">Partner</span>
+        <select id="langB" class="sel b"></select>
+      </label>
+    </div>
+
+    <div id="install" class="card install" hidden></div>
+    <div id="prepare" class="card prepare" hidden></div>
+
+    <main id="chat" class="chat" aria-live="polite"></main>
+
+    <section id="faceView" class="faceview">
+      <div id="halfB" class="half b">
+        <div class="half-msg"></div>
+        <button id="faceMicB" class="mic b"><span class="mic-ico">🎤</span><span class="mic-lang"></span></button>
+      </div>
+      <div id="halfA" class="half a">
+        <div class="half-msg"></div>
+        <button id="faceMicA" class="mic a"><span class="mic-ico">🎤</span><span class="mic-lang"></span></button>
+      </div>
+    </section>
+
+    <div id="status" class="status" hidden></div>
+    <div id="busy" class="busy" hidden><span class="spinner"></span><span id="busyTxt"></span></div>
+
+    <footer class="bottom">
+      <div class="mics">
+        <button id="micA" class="mic a"><span class="mic-ico">🎤</span><span class="mic-txt"><span class="mic-who"></span><span class="mic-lang"></span></span></button>
+        <button id="micB" class="mic b"><span class="mic-ico">🎤</span><span class="mic-txt"><span class="mic-who"></span><span class="mic-lang"></span></span></button>
+      </div>
+      <form id="sendForm" class="send">
+        <input id="text" type="text" autocomplete="off" enterkeyhint="send">
+        <button class="btn primary send-btn" type="submit" aria-label="send">➤</button>
+      </form>
+    </footer>
+  </div>
+
+  <div id="rec" class="rec" hidden>
+    <div class="rec-box">
+      <div id="recTitle" class="rec-title">Listening…</div>
+      <div id="recLang" class="rec-lang"></div>
+      <div class="rec-dot-wrap"><div id="recDot" class="rec-dot">🎤</div></div>
+      <div class="rec-actions">
+        <button id="recCancel" class="btn">Cancel</button>
+        <button id="recDone" class="btn primary">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <dialog id="settings" class="sheet">
+    <div class="sheet-head">
+      <h2 id="setTitle">Settings</h2>
+      <button id="setClose" class="btn">Close</button>
+    </div>
+    <div id="setBody" class="sheet-body"></div>
+  </dialog>
+
+  <noscript>Please enable JavaScript.</noscript>
+  <script type="module" src="app.js?v=4a38890-muwn3fbk"></script>
+</body>
+</html>

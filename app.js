@@ -1,0 +1,628 @@
+import { t, tIn, setUiLang, detectUiLang, uiLang, langName, nativeName, UI_LANGS, checkI18n } from './i18n.js';
+import { LANGS, WHISPER, modelsForPair } from './engine-routes.js';
+import { Recorder, parseWav, getAudioContext } from './audio.js';
+import { openCamera, prepareCamera, __test as camTest } from './camera.js';
+
+// ---------- Настройки ----------
+const store = {
+  get(k, d) {
+    try {
+      const v = localStorage.getItem('pt.' + k);
+      return v === null ? d : JSON.parse(v);
+    } catch (_) {
+      return d;
+    }
+  },
+  set(k, v) {
+    try { localStorage.setItem('pt.' + k, JSON.stringify(v)); } catch (_) {}
+  },
+};
+
+const S = {
+  ui: store.get('ui', 'auto'),
+  a: store.get('a', null),
+  b: store.get('b', null),
+  autoSpeak: store.get('autoSpeak', true),
+  slow: store.get('slow', false),
+  quality: store.get('quality2', 'auto'),
+  face: store.get('face', false),
+  history: store.get('history', []),
+};
+
+setUiLang(S.ui === 'auto' ? detectUiLang() : S.ui);
+if (!S.a) S.a = LANGS.includes(uiLang()) ? uiLang() : 'en';
+if (!S.b) S.b = S.a === 'en' ? 'es' : 'en';
+
+const $ = (s) => document.querySelector(s);
+const el = (tag, cls, text) => {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+};
+
+// Языки, которые быстрая модель распознаёт плохо — для них берём точную
+const NEEDS_ACCURATE = new Set(['fi', 'bg', 'uk', 'et', 'el', 'he', 'th', 'hu', 'cs', 'ro', 'da', 'sv', 'hi', 'vi', 'id', 'ar', 'tr', 'ko']);
+function q() {
+  if (S.quality !== 'auto') return S.quality;
+  return NEEDS_ACCURATE.has(S.a) || NEEDS_ACCURATE.has(S.b) ? 'accurate' : 'fast';
+}
+
+// ---------- Связь с рабочим потоком ----------
+let worker;
+let reqSeq = 0;
+const pending = new Map();
+
+function startWorker() {
+  worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
+  worker.onmessage = (e) => {
+    const m = e.data;
+    const p = pending.get(m.reqId);
+    if (!p) return;
+    if (m.type === 'progress') {
+      p.onProgress && p.onProgress(m);
+      return;
+    }
+    pending.delete(m.reqId);
+    if (m.error) {
+      const err = new Error(m.error);
+      err.crashed = !!m.crashed;
+      p.reject(err);
+    } else p.resolve(m);
+  };
+  worker.onerror = (e) => {
+    console.error('worker error', e.message);
+    // поток упал целиком — перезапускаем, ожидающие запросы завершаем ошибкой
+    for (const [, p] of pending) {
+      const err = new Error('ENGINE_CRASH worker');
+      err.crashed = true;
+      p.reject(err);
+    }
+    pending.clear();
+    try { worker.terminate(); } catch (_) {}
+    startWorker();
+  };
+}
+startWorker();
+
+function rawCall(cmd, data, onProgress) {
+  const reqId = ++reqSeq;
+  return new Promise((resolve, reject) => {
+    pending.set(reqId, { resolve, reject, onProgress });
+    // звук копируем, чтобы можно было повторить запрос после перезапуска
+    worker.postMessage({ reqId, cmd, ...data });
+  });
+}
+
+/** Запрос к движку. Если движок аварийно остановился — перезапускаем и пробуем ещё раз. */
+async function call(cmd, data = {}, onProgress) {
+  try {
+    return await rawCall(cmd, data, onProgress);
+  } catch (e) {
+    if (!e.crashed) throw e;
+    try { worker.terminate(); } catch (_) {}
+    pending.clear();
+    startWorker();
+    return rawCall(cmd, data, onProgress);
+  }
+}
+
+// ---------- Голос ----------
+let voices = [];
+function loadVoices() {
+  voices = window.speechSynthesis ? speechSynthesis.getVoices() : [];
+}
+if (window.speechSynthesis) {
+  loadVoices();
+  speechSynthesis.onvoiceschanged = loadVoices;
+}
+
+function pickVoice(code) {
+  const list = voices.filter((v) => v.lang && v.lang.toLowerCase().replace('_', '-').startsWith(code));
+  if (!list.length) return null;
+  const score = (v) =>
+    (/(premium|enhanced|siri|neural|natural)/i.test(v.name) ? 4 : 0) + (v.localService ? 2 : 0) + (v.default ? 1 : 0);
+  return list.sort((x, y) => score(y) - score(x))[0];
+}
+
+let speechUnlocked = false;
+function unlockSpeech() {
+  if (speechUnlocked || !window.speechSynthesis) return;
+  speechUnlocked = true;
+  try {
+    const u = new SpeechSynthesisUtterance(' ');
+    u.volume = 0;
+    speechSynthesis.speak(u);
+  } catch (_) {}
+  try { getAudioContext().resume(); } catch (_) {}
+}
+
+function speak(text, code) {
+  if (!window.speechSynthesis || !text) return;
+  if (!voices.length) loadVoices();
+  const v = pickVoice(code);
+  if (!v) {
+    toast(t('noVoice') + ' (' + langName(code) + ')');
+    return;
+  }
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.voice = v;
+  u.lang = v.lang;
+  u.rate = S.slow ? 0.75 : 0.95;
+  speechSynthesis.speak(u);
+}
+
+// ---------- Сообщения ----------
+let toastTimer;
+function toast(msg, ms = 4500) {
+  const s = $('#status');
+  s.textContent = msg;
+  s.hidden = !msg;
+  clearTimeout(toastTimer);
+  if (msg && ms) toastTimer = setTimeout(() => { s.hidden = true; }, ms);
+}
+
+function friendlyError(err) {
+  const m = String(err && err.message ? err.message : err);
+  if (/fetch|network|load|404|offline/i.test(m) && !navigator.onLine) return t('notDownloaded');
+  if (/fetch|network/i.test(m)) return t('notDownloaded');
+  return t('error');
+}
+
+// ---------- Готовность к офлайну ----------
+let pairReady = false;
+async function refreshReady() {
+  const specs = modelsForPair(S.a, S.b);
+  try {
+    const r = await call('status', { specs, quality: q() });
+    pairReady = r.asr && r.mt.every(Boolean);
+  } catch (_) {
+    pairReady = false;
+  }
+  renderPrepare();
+  if (pairReady) call('warm', { specs, quality: q() }).catch(() => {});
+}
+
+function approxMb() {
+  const asr = q() === 'accurate' ? 250 : 135;
+  return asr + modelsForPair(S.a, S.b).reduce((sum, m) => sum + (m.nllb ? 650 : 110), 0);
+}
+
+let downloading = false;
+async function downloadPair() {
+  if (downloading) return;
+  downloading = true;
+  renderPrepare();
+  try {
+    if (navigator.storage && navigator.storage.persist) await navigator.storage.persist();
+  } catch (_) {}
+  const specs = modelsForPair(S.a, S.b);
+  try {
+    await call('prepare', { specs, quality: q() }, (p) => updateProgress(p));
+    // В фоне — распознавание текста для камеры (тоже для работы без интернета)
+    prepareCamera(S.a, S.b).catch(() => {});
+    downloading = false;
+    await refreshReady();
+    toast(t('readyOffline'));
+  } catch (e) {
+    downloading = false;
+    renderPrepare();
+    toast(friendlyError(e), 8000);
+  }
+}
+
+let progressState = { loaded: 0, total: 0 };
+function updateProgress(p) {
+  progressState = p;
+  const bar = $('#prepBar');
+  const txt = $('#prepTxt');
+  if (bar && p.total) {
+    bar.style.width = Math.min(100, (p.loaded / p.total) * 100).toFixed(0) + '%';
+    txt.textContent = `${t('downloading')} ${(p.loaded / 1048576).toFixed(0)} / ${(p.total / 1048576).toFixed(0)} MB`;
+  }
+  const busy = $('#busyTxt');
+  if (busy && !$('#busy').hidden && p.total) {
+    busy.textContent = `${t('loading')} ${Math.round((p.loaded / p.total) * 100)}%`;
+  }
+}
+
+function renderPrepare() {
+  const box = $('#prepare');
+  box.innerHTML = '';
+  if (pairReady) {
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  box.append(el('div', 'prep-title', t('prepareTitle')));
+  box.append(el('div', 'prep-text', `${t('prepareText')} (~${approxMb()} MB)`));
+  if (downloading) {
+    const track = el('div', 'bar');
+    const fill = el('div', 'bar-fill');
+    fill.id = 'prepBar';
+    track.append(fill);
+    box.append(track);
+    const txt = el('div', 'prep-text', t('downloading'));
+    txt.id = 'prepTxt';
+    box.append(txt);
+    updateProgress(progressState);
+  } else {
+    const btn = el('button', 'btn primary', t('download'));
+    btn.onclick = () => { unlockSpeech(); downloadPair(); };
+    box.append(btn);
+  }
+}
+
+// ---------- Языки ----------
+function fillSelect(sel, value) {
+  sel.innerHTML = '';
+  const sorted = [...LANGS].sort((x, y) => langName(x).localeCompare(langName(y), uiLang()));
+  for (const code of sorted) {
+    const o = el('option', null, langName(code));
+    o.value = code;
+    if (code === value) o.selected = true;
+    sel.append(o);
+  }
+}
+
+function setLangs(a, b) {
+  if (a === b) b = a === S.a ? S.b : S.a;
+  S.a = a;
+  S.b = b;
+  store.set('a', a);
+  store.set('b', b);
+  fillSelect($('#langA'), S.a);
+  fillSelect($('#langB'), S.b);
+  renderMics();
+  renderFace();
+  refreshReady();
+}
+
+// ---------- Разговор ----------
+function addExchange(x) {
+  S.history.push(x);
+  if (S.history.length > 100) S.history.splice(0, S.history.length - 100);
+  store.set('history', S.history);
+  renderChat();
+  renderFace();
+}
+
+function bubble(x) {
+  const b = el('div', 'bubble ' + (x.side === 'A' ? 'me' : 'them'));
+  b.append(el('div', 'orig', x.text));
+  const row = el('div', 'tr-row');
+  const tr = el('div', 'tr', x.tr);
+  tr.lang = x.tgt;
+  const sp = el('button', 'icon', '🔊');
+  sp.setAttribute('aria-label', 'speak');
+  sp.onclick = () => { unlockSpeech(); speak(x.tr, x.tgt); };
+  row.append(tr, sp);
+  b.append(row);
+  b.onclick = (ev) => {
+    if (ev.target === sp) return;
+    navigator.clipboard && navigator.clipboard.writeText(x.tr).then(() => toast(t('copied'), 1500)).catch(() => {});
+  };
+  return b;
+}
+
+function renderChat() {
+  const c = $('#chat');
+  c.innerHTML = '';
+  if (!S.history.length) {
+    const e = el('div', 'empty');
+    e.append(el('div', 'empty-icon', '🎙️'), el('div', 'empty-title', t('tapMic')), el('div', 'empty-sub', t('worksOffline')));
+    c.append(e);
+    return;
+  }
+  for (const x of S.history) c.append(bubble(x));
+  requestAnimationFrame(() => { c.scrollTop = c.scrollHeight; });
+}
+
+function renderMics() {
+  $('#micA .mic-lang').textContent = langName(S.a);
+  $('#micB .mic-lang').textContent = langName(S.b);
+  $('#micA .mic-who').textContent = t('me');
+  $('#micB .mic-who').textContent = t('partner');
+  $('#text').placeholder = `${t('typeHere')} (${langName(S.a)})`;
+}
+
+function renderFace() {
+  const last = S.history[S.history.length - 1];
+  for (const side of ['A', 'B']) {
+    const half = $(side === 'A' ? '#halfA' : '#halfB');
+    const code = side === 'A' ? S.a : S.b;
+    const msg = half.querySelector('.half-msg');
+    msg.className = 'half-msg';
+    // Половина собеседника — полностью на его языке
+    if (!last) {
+      msg.innerHTML = '';
+      const n = el('div', 'half-lang', nativeName(code));
+      const h = el('div', 'half-hint', tIn(code, 'tapMic'));
+      msg.append(n, h);
+    } else if (last.side !== side) {
+      msg.textContent = last.tr;
+      msg.classList.add('big');
+    } else msg.textContent = last.text;
+    half.querySelector('.mic-lang').textContent = nativeName(code);
+  }
+}
+
+function applyMode() {
+  document.body.classList.toggle('face', S.face);
+  $('#modeBtn').textContent = S.face ? '💬' : '👥';
+  renderFace();
+}
+
+// ---------- Микрофон ----------
+let recorder = null;
+let working = false;
+
+async function listen(side) {
+  unlockSpeech();
+  if (working) return;
+  const src = side === 'A' ? S.a : S.b;
+  const tgt = side === 'A' ? S.b : S.a;
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    toast(t('micDenied'));
+    return;
+  }
+  if (!WHISPER.has(src)) return;
+  working = true;
+  if (window.speechSynthesis) speechSynthesis.cancel();
+  recorder = new Recorder();
+  showRec(side, true);
+  let audio;
+  try {
+    audio = await recorder.record((lvl) => setLevel(lvl));
+  } catch (e) {
+    showRec(side, false);
+    working = false;
+    toast(t('micDenied'), 6000);
+    return;
+  }
+  showRec(side, false);
+  if (!audio) { working = false; return; }
+  if (audio.length < 16000 / 3) {
+    working = false;
+    toast(t('noSpeech'));
+    return;
+  }
+  await process(side, src, tgt, () => call('asr', { audio, lang: src, quality: q() }, updateProgress));
+}
+
+async function process(side, src, tgt, getText) {
+  working = true;
+  showBusy(t('recognizing'));
+  try {
+    const r = await getText();
+    const text = (r.text || '').trim();
+    if (!text) {
+      toast(t('notUnderstood'));
+      return;
+    }
+    showBusy(t('translating'));
+    const tr = await call('translate', { text, src, tgt }, updateProgress);
+    const x = { side, src, tgt, text, tr: tr.text, at: Date.now() };
+    addExchange(x);
+    if (S.autoSpeak) speak(x.tr, tgt);
+  } catch (e) {
+    console.error(e);
+    toast(friendlyError(e), 7000);
+  } finally {
+    hideBusy();
+    working = false;
+  }
+}
+
+function showRec(side, on) {
+  const r = $('#rec');
+  r.hidden = !on;
+  r.classList.toggle('b', side === 'B');
+  // В режиме «лицом к лицу» окно записи собеседника повёрнуто к нему и на его языке
+  const code = side === 'A' ? S.a : S.b;
+  const theirs = S.face && side === 'B';
+  r.classList.toggle('flip', theirs);
+  const L = theirs ? code : uiLang();
+  $('#recTitle').textContent = tIn(L, 'listening');
+  $('#recDone').textContent = tIn(L, 'done');
+  $('#recCancel').textContent = tIn(L, 'cancel');
+  $('#recLang').textContent = theirs ? nativeName(code) : langName(code);
+  setLevel(0);
+}
+
+function setLevel(l) {
+  $('#recDot').style.transform = `scale(${1 + l * 0.6})`;
+}
+
+function showBusy(text) {
+  $('#busy').hidden = false;
+  $('#busyTxt').textContent = text;
+}
+
+function hideBusy() {
+  $('#busy').hidden = true;
+}
+
+// ---------- Настройки ----------
+function openSettings() {
+  const d = $('#settings');
+  const body = $('#setBody');
+  body.innerHTML = '';
+  const row = (label, control) => {
+    const r = el('label', 'set-row');
+    r.append(el('span', null, label), control);
+    body.append(r);
+  };
+  const toggle = (val, fn) => {
+    const i = el('input');
+    i.type = 'checkbox';
+    i.className = 'switch';
+    i.checked = val;
+    i.onchange = () => fn(i.checked);
+    return i;
+  };
+  const uiSel = el('select');
+  const auto = el('option', null, t('auto'));
+  auto.value = 'auto';
+  uiSel.append(auto);
+  for (const c of UI_LANGS) {
+    const o = el('option', null, nativeName(c));
+    o.value = c;
+    uiSel.append(o);
+  }
+  uiSel.value = S.ui;
+  uiSel.onchange = () => {
+    S.ui = uiSel.value;
+    store.set('ui', S.ui);
+    setUiLang(S.ui === 'auto' ? detectUiLang() : S.ui);
+    renderAll();
+    openSettings();
+  };
+  row(t('uiLanguage'), uiSel);
+  row(t('autoSpeak'), toggle(S.autoSpeak, (v) => { S.autoSpeak = v; store.set('autoSpeak', v); }));
+  row(t('slowSpeech'), toggle(S.slow, (v) => { S.slow = v; store.set('slow', v); }));
+  const qs = el('select');
+  for (const [v, k] of [['auto', 'auto'], ['fast', 'fast'], ['accurate', 'accurate']]) {
+    const o = el('option', null, t(k));
+    o.value = v;
+    qs.append(o);
+  }
+  qs.value = S.quality;
+  qs.onchange = () => { S.quality = qs.value; store.set('quality2', qs.value); refreshReady(); };
+  row(t('recognition'), qs);
+  row(t('faceMode'), toggle(S.face, (v) => { S.face = v; store.set('face', v); applyMode(); }));
+  const clr = el('button', 'btn', t('clearHistory'));
+  clr.onclick = () => { S.history = []; store.set('history', []); renderChat(); renderFace(); d.close(); };
+  body.append(clr);
+  $('#setTitle').textContent = t('settings');
+  $('#setClose').textContent = t('close');
+  d.showModal();
+}
+
+// ---------- Установка на экран «Домой» ----------
+function renderInstall() {
+  const standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+  const box = $('#install');
+  if (standalone || store.get('installDismissed', false)) {
+    box.hidden = true;
+    return;
+  }
+  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  box.hidden = false;
+  box.innerHTML = '';
+  box.append(el('div', 'inst-title', t('installTitle')));
+  box.append(el('div', 'inst-text', ios ? t('installIOS') + '  ⬆️' : t('installAndroid')));
+  const x = el('button', 'icon close', '✕');
+  x.onclick = () => { store.set('installDismissed', true); box.hidden = true; };
+  box.append(x);
+}
+
+// ---------- Отрисовка ----------
+function renderAll() {
+  document.title = t('appName');
+  $('#title').textContent = t('appName');
+  $('#langALabel').textContent = t('myLanguage');
+  $('#langBLabel').textContent = t('partnerLanguage');
+  $('#recDone').textContent = t('done');
+  $('#recCancel').textContent = t('cancel');
+  $('#recTitle').textContent = t('listening');
+  fillSelect($('#langA'), S.a);
+  fillSelect($('#langB'), S.b);
+  renderMics();
+  renderChat();
+  renderFace();
+  renderPrepare();
+  renderInstall();
+  applyMode();
+}
+
+function bind() {
+  $('#langA').onchange = (e) => setLangs(e.target.value, S.b);
+  $('#langB').onchange = (e) => setLangs(S.a, e.target.value);
+  $('#swap').onclick = () => setLangs(S.b, S.a);
+  $('#micA').onclick = () => listen('A');
+  $('#micB').onclick = () => listen('B');
+  $('#faceMicA').onclick = () => listen('A');
+  $('#faceMicB').onclick = () => listen('B');
+  $('#recDone').onclick = () => recorder && recorder.stop();
+  $('#recCancel').onclick = () => recorder && recorder.cancel();
+  $('#modeBtn').onclick = () => { S.face = !S.face; store.set('face', S.face); applyMode(); };
+  $('#setBtn').onclick = openSettings;
+  $('#camBtn').onclick = () => {
+    unlockSpeech();
+    openCamera({
+      myLang: S.a,
+      partnerLang: S.b,
+      translate: async (text, src, tgt) => (await call('translate', { text, src, tgt })).text,
+      speak,
+      toast: (m) => toast(m),
+    });
+  };
+  $('#setClose').onclick = () => $('#settings').close();
+  $('#sendForm').onsubmit = (e) => {
+    e.preventDefault();
+    unlockSpeech();
+    const text = $('#text').value.trim();
+    if (!text || working) return;
+    $('#text').value = '';
+    $('#text').blur();
+    process('A', S.a, S.b, async () => ({ text }));
+  };
+  window.addEventListener('online', refreshReady);
+}
+
+renderAll();
+bind();
+refreshReady();
+
+// Сервис-воркер: всё приложение доступно без интернета
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('./sw.js').catch((e) => console.warn('sw', e));
+}
+
+// ---------- Самопроверка (используется автоматическими тестами) ----------
+window.__selftest = async (cases, opts = {}) => {
+  const out = { i18n: checkI18n(), results: [] };
+  if (opts.fresh) {
+    try { worker.terminate(); } catch (_) {}
+    pending.clear();
+    startWorker();
+  }
+  for (const c of cases) {
+    const r = { ...c };
+    try {
+      if (c.wav) {
+        const buf = await (await fetch(c.wav)).arrayBuffer();
+        const audio = parseWav(buf);
+        const a = await call('asr', { audio, lang: c.src, quality: c.quality || 'fast' });
+        r.heard = a.text;
+        r.asrLoadMs = Math.round(a.loadMs);
+        r.asrRunMs = Math.round(a.runMs);
+      }
+      const text = r.heard ?? c.text;
+      const tr = await call('translate', { text, src: c.src, tgt: c.tgt });
+      r.translation = tr.text;
+      r.mtMs = Math.round(tr.runMs);
+    } catch (e) {
+      r.error = String(e.message || e);
+    }
+    out.results.push(r);
+  }
+  return out;
+};
+window.__camtest = async (lines, candidates, tgt) => {
+  const c = document.createElement('canvas');
+  c.width = 1200;
+  c.height = 120 + lines.length * 90;
+  const g = c.getContext('2d');
+  g.fillStyle = '#fff';
+  g.fillRect(0, 0, c.width, c.height);
+  g.fillStyle = '#111';
+  g.font = '44px Arial, sans-serif';
+  g.textBaseline = 'top';
+  lines.forEach((ln, i) => g.fillText(ln, 40, 50 + i * 90));
+  return camTest(c, candidates, tgt, async (text, src, t2) => (await call('translate', { text, src, tgt: t2 })).text);
+};
+window.__status = (a, b, q) => call('status', { specs: modelsForPair(a, b), quality: q || 'fast' });
