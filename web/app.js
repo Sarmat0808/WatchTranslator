@@ -1,6 +1,7 @@
-import { t, setUiLang, detectUiLang, uiLang, langName, nativeName, UI_LANGS, checkI18n } from './i18n.js';
+import { t, tIn, setUiLang, detectUiLang, uiLang, langName, nativeName, UI_LANGS, checkI18n } from './i18n.js';
 import { LANGS, WHISPER, modelsForPair } from './engine-routes.js';
 import { Recorder, parseWav, getAudioContext } from './audio.js';
+import { openCamera, prepareCamera, __test as camTest } from './camera.js';
 
 // ---------- Настройки ----------
 const store = {
@@ -199,6 +200,8 @@ async function downloadPair() {
   const specs = modelsForPair(S.a, S.b);
   try {
     await call('prepare', { specs, quality: q() }, (p) => updateProgress(p));
+    // В фоне — распознавание текста для камеры (тоже для работы без интернета)
+    prepareCamera(S.a, S.b).catch(() => {});
     downloading = false;
     await refreshReady();
     toast(t('readyOffline'));
@@ -331,12 +334,17 @@ function renderFace() {
     const code = side === 'A' ? S.a : S.b;
     const msg = half.querySelector('.half-msg');
     msg.className = 'half-msg';
-    if (!last) msg.textContent = langName(code);
-    else if (last.side !== side) {
+    // Половина собеседника — полностью на его языке
+    if (!last) {
+      msg.innerHTML = '';
+      const n = el('div', 'half-lang', nativeName(code));
+      const h = el('div', 'half-hint', tIn(code, 'tapMic'));
+      msg.append(n, h);
+    } else if (last.side !== side) {
       msg.textContent = last.tr;
       msg.classList.add('big');
     } else msg.textContent = last.text;
-    half.querySelector('.mic-lang').textContent = langName(code);
+    half.querySelector('.mic-lang').textContent = nativeName(code);
   }
 }
 
@@ -411,7 +419,15 @@ function showRec(side, on) {
   const r = $('#rec');
   r.hidden = !on;
   r.classList.toggle('b', side === 'B');
-  $('#recLang').textContent = langName(side === 'A' ? S.a : S.b);
+  // В режиме «лицом к лицу» окно записи собеседника повёрнуто к нему и на его языке
+  const code = side === 'A' ? S.a : S.b;
+  const theirs = S.face && side === 'B';
+  r.classList.toggle('flip', theirs);
+  const L = theirs ? code : uiLang();
+  $('#recTitle').textContent = tIn(L, 'listening');
+  $('#recDone').textContent = tIn(L, 'done');
+  $('#recCancel').textContent = tIn(L, 'cancel');
+  $('#recLang').textContent = theirs ? nativeName(code) : langName(code);
   setLevel(0);
 }
 
@@ -534,6 +550,16 @@ function bind() {
   $('#recCancel').onclick = () => recorder && recorder.cancel();
   $('#modeBtn').onclick = () => { S.face = !S.face; store.set('face', S.face); applyMode(); };
   $('#setBtn').onclick = openSettings;
+  $('#camBtn').onclick = () => {
+    unlockSpeech();
+    openCamera({
+      myLang: S.a,
+      partnerLang: S.b,
+      translate: async (text, src, tgt) => (await call('translate', { text, src, tgt })).text,
+      speak,
+      toast: (m) => toast(m),
+    });
+  };
   $('#setClose').onclick = () => $('#settings').close();
   $('#sendForm').onsubmit = (e) => {
     e.preventDefault();
@@ -585,5 +611,18 @@ window.__selftest = async (cases, opts = {}) => {
     out.results.push(r);
   }
   return out;
+};
+window.__camtest = async (lines, candidates, tgt) => {
+  const c = document.createElement('canvas');
+  c.width = 1200;
+  c.height = 120 + lines.length * 90;
+  const g = c.getContext('2d');
+  g.fillStyle = '#fff';
+  g.fillRect(0, 0, c.width, c.height);
+  g.fillStyle = '#111';
+  g.font = '44px Arial, sans-serif';
+  g.textBaseline = 'top';
+  lines.forEach((ln, i) => g.fillText(ln, 40, 50 + i * 90));
+  return camTest(c, candidates, tgt, async (text, src, t2) => (await call('translate', { text, src, tgt: t2 })).text);
 };
 window.__status = (a, b, q) => call('status', { specs: modelsForPair(a, b), quality: q || 'fast' });

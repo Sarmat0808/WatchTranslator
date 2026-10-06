@@ -27,7 +27,7 @@ self.addEventListener('fetch', (e) => {
   if (url.origin !== self.location.origin) return; // модели с Hugging Face кэширует сама библиотека
 
   // Наши сконвертированные модели: один раз скачали — дальше всегда из кэша
-  if (url.pathname.includes('/models/')) {
+  if (/\/(models|tess|tess-core)\/|tesseract|franc/.test(url.pathname)) {
     e.respondWith(
       caches.open(MODELS).then(async (c) => {
         const hit = await c.match(req, { ignoreSearch: true });

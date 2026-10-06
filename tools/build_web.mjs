@@ -53,7 +53,7 @@ const walk = (dir, rel = '') => {
     const p = path.join(dir, f);
     const r = rel ? rel + '/' + f : f;
     if (fs.statSync(p).isDirectory()) {
-      if (r === 'models' || r === 'test') continue;
+      if (r === 'models' || r === 'test' || r === 'tess' || r === 'vendor/tess-core') continue;
       walk(p, r);
     } else if (r !== 'sw.js') files.push('./' + r);
   }

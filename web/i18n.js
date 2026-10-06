@@ -73,6 +73,13 @@ export function uiLang() {
   return current;
 }
 
+/** Текст на любом языке (для половины собеседника в режиме «лицом к лицу»). */
+export function tIn(lang, key) {
+  const vals = T[lang] || T.en;
+  const i = K.indexOf(key);
+  return (i >= 0 && vals[i]) || T.en[i] || key;
+}
+
 export function t(key) {
   return dict[key] ?? key;
 }

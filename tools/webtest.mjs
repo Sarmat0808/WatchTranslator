@@ -114,6 +114,13 @@ async function runEngine(name, type, device) {
     if (!one) break;
     if (x.error && /ENGINE_CRASH/.test(x.error)) log('   (engine crashed — app restarts it automatically)');
   }
+  // Камера: распознавание текста, определение языка и перевод
+  try {
+    const cam = await withTimeout(page.evaluate(() => window.__camtest(
+      ['Hyvää huomenta! Missä on lähin apteekki?', 'Kiitos paljon avustasi.', 'Opening hours from nine to five'],
+      ['fi', 'en', 'ru'], 'ru')), 300000);
+    log('[CAMERA]', JSON.stringify(cam));
+  } catch (e) { log('[CAMERA] ERROR', e.message); }
   log(`selftest done in ${((Date.now() - t0) / 1000).toFixed(0)}s; i18n problems: ${JSON.stringify(r.i18n)}`);
   report[name] = r;
 

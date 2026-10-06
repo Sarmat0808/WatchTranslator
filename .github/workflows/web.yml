@@ -9,6 +9,7 @@ on:
       - tools/webtest.mjs
       - tools/make_test_wavs.py
       - tools/convert_models.sh
+      - tools/web_ocr_assets.sh
       - .github/workflows/web.yml
 
 concurrency:
@@ -66,9 +67,10 @@ jobs:
           npm install --no-audit --no-fund --no-progress @huggingface/transformers@3.7.6 playwright@1
           ls node_modules/@huggingface/transformers/dist
       - name: Build site
-        timeout-minutes: 5
+        timeout-minutes: 15
         run: |
           node tools/build_web.mjs
+          bash tools/web_ocr_assets.sh
           mkdir -p site/models
           cp -r converted/local site/models/
           rm -rf site/models/local/opus-mt-tc-big-*   # эти не заработали (другой словарь), вместо них NLLB
