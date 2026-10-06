@@ -54,7 +54,7 @@ class PhoneViewModel(app: Application) : AndroidViewModel(app), TextToSpeech.OnI
         private set
     var slowSpeech by mutableStateOf(prefs.getBoolean("slow", false))
         private set
-    var voiceId by mutableStateOf(prefs.getInt("voiceId", 0))
+    var voiceId by mutableStateOf(prefs.getInt("voice2", 0).coerceIn(0, OfflineVoice.VOICES - 1))
         private set
     var useOfflineVoice by mutableStateOf(prefs.getBoolean("offlineVoice", true))
         private set
@@ -336,7 +336,7 @@ class PhoneViewModel(app: Application) : AndroidViewModel(app), TextToSpeech.OnI
 
     fun nextVoice() {
         voiceId = (voiceId + 1) % OfflineVoice.VOICES
-        prefs.edit().putInt("voiceId", voiceId).apply()
+        prefs.edit().putInt("voice2", voiceId).apply()
         val sample = when (langB) {
             "fi" -> "Hei, tämä on uusi ääni."
             "bg" -> "Здравей, това е новият глас."

@@ -5,6 +5,7 @@ import android.content.Context
 import android.speech.tts.TextToSpeech
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
@@ -49,7 +50,7 @@ class TranslatorViewModel(app: Application) : AndroidViewModel(app), TextToSpeec
     var missingVoice by mutableStateOf<String?>(null)
         private set
 
-    var voiceId by mutableStateOf(prefs.getInt("voiceId", 0))
+    var voiceId by mutableStateOf(prefs.getInt("voice2", 0).coerceIn(0, OfflineVoice.VOICES - 1))
         private set
     var useOfflineVoice by mutableStateOf(prefs.getBoolean("offlineVoice", true))
         private set
@@ -103,13 +104,22 @@ class TranslatorViewModel(app: Application) : AndroidViewModel(app), TextToSpeec
     init {
         loadHistory()
         refreshModels()
-        if (ttsInstalled) preloadVoice()
         refreshPhone()
-        // Заранее загружаем распознавание, чтобы первая фраза не ждала загрузки модели
-        if (asrInstalled) viewModelScope.launch(Dispatchers.Default) {
-            runCatching { offlineEars.load(source) }
+        // Модели НЕ грузим при запуске: у часов мало памяти, приложение должно открываться мгновенно.
+        // Они загружаются, пока человек говорит (см. startListening).
+    }
+
+    /** Часы свернули приложение — освобождаем память (модели загрузятся снова, пока человек говорит). */
+    fun trimMemory() {
+        if (recording || recognizing || speaking) return
+        viewModelScope.launch(Dispatchers.Default) {
+            runCatching { offlineEars.release() }
+            runCatching { offlineVoice.release() }
         }
     }
+
+    /** Время начала скачивания словаря (для отображения хода загрузки). */
+    val downloadStarted = mutableStateMapOf<String, Long>()
 
     private fun preloadVoice() {
         viewModelScope.launch(Dispatchers.Default) {
@@ -202,6 +212,16 @@ class TranslatorViewModel(app: Application) : AndroidViewModel(app), TextToSpeec
         status = null
         recording = true
         micLevel = 0f
+        // Пока человек говорит, в фоне готовим модели — так ответ приходит быстрее
+        val tgtNow = target
+        viewModelScope.launch(Dispatchers.Default) {
+            if (!(usePhone && phoneConnected) && asrInstalled && offlineEars.supports(lang)) {
+                runCatching { offlineEars.load(lang) }
+            }
+            if (useOfflineVoice && ttsInstalled && offlineVoice.supports(tgtNow)) {
+                runCatching { offlineVoice.load() }
+            }
+        }
         listenJob = viewModelScope.launch {
             try {
                 val audio = withContext(Dispatchers.IO) {
@@ -321,6 +341,7 @@ class TranslatorViewModel(app: Application) : AndroidViewModel(app), TextToSpeec
         if (isReady(code) || code in downloading) return
         viewModelScope.launch {
             downloading.add(code)
+            downloadStarted[code] = System.currentTimeMillis()
             status = "Скачиваю: ${Languages.name(code)}…"
             try {
                 modelManager.download(TranslateRemoteModel.Builder(code).build(), anyNetwork).await()
@@ -329,6 +350,7 @@ class TranslatorViewModel(app: Application) : AndroidViewModel(app), TextToSpeec
                 status = "Не скачалось (${Languages.name(code)}). Включите Wi‑Fi на часах"
             } finally {
                 downloading.remove(code)
+                downloadStarted.remove(code)
                 refreshModels()
             }
         }
@@ -415,7 +437,7 @@ class TranslatorViewModel(app: Application) : AndroidViewModel(app), TextToSpeec
                 missingVoice = null
                 try {
                     withContext(Dispatchers.Default) {
-                        offlineVoice.speak(text, code, voiceId, if (slowSpeech) 0.8f else 1.0f, steps = 3)
+                        offlineVoice.speak(text, code, voiceId, if (slowSpeech) 0.8f else 1.0f, steps = 4)
                     }
                 } catch (e: Exception) {
                     systemSpeak(text, code)
@@ -430,7 +452,7 @@ class TranslatorViewModel(app: Application) : AndroidViewModel(app), TextToSpeec
 
     fun nextVoice() {
         voiceId = (voiceId + 1) % OfflineVoice.VOICES
-        prefs.edit().putInt("voiceId", voiceId).apply()
+        prefs.edit().putInt("voice2", voiceId).apply()
         val sample = if (outputText.isNotEmpty()) outputText else when (target) {
             "fi" -> "Hei, tämä on uusi ääni."
             "bg" -> "Здравей, това е новият глас."

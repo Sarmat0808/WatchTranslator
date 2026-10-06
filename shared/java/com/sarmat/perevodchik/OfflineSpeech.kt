@@ -31,7 +31,12 @@ class OfflineVoice(private val context: Context, private val threads: Int = 2) {
             "hi", "hr", "hu", "id", "it", "lt", "lv", "nl", "pl", "pt", "ro", "ru", "sk",
             "sl", "sv", "tr", "uk", "vi"
         )
-        const val VOICES = 10
+        /**
+         * Из 10 голосов модели оставлены только разборчивые на русском, финском и болгарском
+         * (проверено автотестом: голос озвучивает фразу, распознавание проверяет каждую букву).
+         */
+        val GOOD_VOICES = intArrayOf(0, 2, 9, 5)
+        val VOICES = GOOD_VOICES.size
     }
 
     private var tts: OfflineTts? = null
@@ -73,7 +78,7 @@ class OfflineVoice(private val context: Context, private val threads: Int = 2) {
                 text,
                 GenerationConfig(
                     speed = speed,
-                    sid = voice.coerceIn(0, VOICES - 1),
+                    sid = GOOD_VOICES[voice.coerceIn(0, VOICES - 1)],
                     numSteps = steps,
                     extra = mapOf("lang" to lang)
                 )

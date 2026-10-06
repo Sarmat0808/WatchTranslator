@@ -12,6 +12,7 @@ import android.provider.Settings
 import android.speech.RecognizerIntent
 import android.speech.tts.TextToSpeech
 import androidx.activity.ComponentActivity
+import androidx.activity.viewModels
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -32,6 +33,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -66,9 +69,16 @@ import androidx.wear.compose.navigation.rememberSwipeDismissableNavController
 import androidx.wear.input.RemoteInputIntentHelper
 
 class MainActivity : ComponentActivity() {
+    private val vm: TranslatorViewModel by viewModels()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { App() }
+        setContent { App(vm) }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        vm.trimMemory() // часы свернули приложение — отдаём память системе
     }
 }
 
@@ -497,6 +507,17 @@ fun ModelsScreen(vm: TranslatorViewModel) {
         items(Languages.all) { code ->
             val ready = vm.isReady(code)
             val loading = code in vm.downloading
+            // ML Kit не сообщает процент — показываем время и примерный ход загрузки
+            var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+            LaunchedEffect(loading) {
+                while (loading) {
+                    now = System.currentTimeMillis()
+                    delay(500)
+                }
+            }
+            val started = vm.downloadStarted[code] ?: now
+            val secs = ((now - started) / 1000).coerceAtLeast(0)
+            val est = (1.0 - kotlin.math.exp(-secs / 25.0)).toFloat().coerceAtMost(0.95f)
             Chip(
                 onClick = {
                     when {
@@ -510,10 +531,17 @@ fun ModelsScreen(vm: TranslatorViewModel) {
                     }
                 },
                 label = { Text(Languages.name(code)) },
+                icon = if (loading) ({
+                    CircularProgressIndicator(
+                        progress = est,
+                        modifier = Modifier.size(24.dp),
+                        strokeWidth = 3.dp
+                    )
+                }) else null,
                 secondaryLabel = {
                     Text(
                         when {
-                            loading -> "⏳ скачивается…"
+                            loading -> "≈${(est * 100).toInt()}% · ${secs} с · ~30 МБ"
                             confirmDelete == code -> "Нажмите ещё раз — удалить"
                             ready -> "✓ скачан"
                             else -> "⬇ скачать"
