@@ -4,9 +4,11 @@ import { pipeline, env } from './vendor/transformers.js';
 import { route } from './engine-routes.js';
 
 const base = new URL('./', self.location.href).href;
+// Где лежат наши сконвертированные модели (в приложении для телефона — на сайте)
+const modelsBase = new URL(self.location.href).searchParams.get('models') || base + 'models/';
 env.useBrowserCache = true;
 env.allowRemoteModels = true;
-env.localModelPath = base + 'models/';
+env.localModelPath = modelsBase;
 env.backends.onnx.wasm.wasmPaths = base + 'ort/';
 env.backends.onnx.wasm.proxy = false;
 
@@ -118,7 +120,7 @@ async function isCached(spec) {
   try {
     const c = await caches.open('transformers-cache');
     if (spec.local) {
-      const key = base + 'models/' + spec.id + '/onnx/decoder_model_merged_quantized.onnx';
+      const key = modelsBase + spec.id + '/onnx/decoder_model_merged_quantized.onnx';
       if (await c.match(key)) return true;
       const m = await caches.open('models-v1');
       return !!(await m.match(key));

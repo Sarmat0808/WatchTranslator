@@ -31,6 +31,12 @@ jobs:
       - name: Accept Android licenses
         timeout-minutes: 5
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Translation engine assets (Helsinki OPUS-MT, same as web version)
+        timeout-minutes: 10
+        run: bash tools/build_mt_assets.sh < /dev/null
       - name: Get sherpa-onnx (offline speech engine)
         run: |
           mkdir -p app/libs

@@ -70,8 +70,8 @@ import com.sarmat.perevodchik.UiText
 import com.sarmat.perevodchik.OfflineVoice
 import com.sarmat.perevodchik.VoicePack
 
-private val ColorA = Color(0xFF1E88E5)
-private val ColorB = Color(0xFFFFB300)
+val ColorA = Color(0xFF1E88E5)
+val ColorB = Color(0xFFFFB300)
 
 class PhoneActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -177,7 +177,9 @@ fun MainScreen(vm: PhoneViewModel, openCamera: () -> Unit, openSettings: () -> U
         }
 
         // Подсказка о скачивании
-        if (!vm.hasMic() || !vm.hasVoice() || !vm.isLangReady(vm.langA) || !vm.isLangReady(vm.langB)) {
+        if (!vm.hasMic() || !vm.hasVoice() || !vm.isLangReady(vm.langA) || !vm.isLangReady(vm.langB) ||
+            (vm.useHelsinki && vm.mtSupported && !vm.mtReady)
+        ) {
             Card(
                 colors = CardDefaults.cardColors(containerColor = Color(0xFF263238)),
                 modifier = Modifier
@@ -498,6 +500,10 @@ fun SettingsScreen(vm: PhoneViewModel, onBack: () -> Unit) {
             )
         }
 
+        item { Section("Точный перевод (Helsinki)") }
+        item { MtRow(vm) }
+        item { ToggleRow("Использовать точный перевод", vm.useHelsinki) { vm.toggleHelsinki() } }
+
         item { Section("Голос") }
         item { ToggleRow("Сразу озвучивать перевод", vm.autoSpeak) { vm.toggleAutoSpeak() } }
         item { ToggleRow("Медленная речь", vm.slowSpeech) { vm.toggleSlow() } }
@@ -516,6 +522,19 @@ fun SettingsScreen(vm: PhoneViewModel, onBack: () -> Unit) {
             OutlinedButton(onClick = { vm.clearHistory() }, modifier = Modifier.fillMaxWidth()) {
                 Text("Очистить историю")
             }
+        }
+        item { Section("Лицензии") }
+        item {
+            Text(
+                "Перевод: модели Helsinki-NLP OPUS-MT, Университет Хельсинки (CC-BY 4.0) и Google ML Kit.\n" +
+                    "Распознавание речи: OpenAI Whisper (MIT) на движке sherpa-onnx (Apache 2.0).\n" +
+                    "Голос: Supertone Supertonic-3 (OpenRAIL-M — запрещено использовать для обмана, " +
+                    "выдачи себя за другого человека и иного вредного применения).\n" +
+                    "Распознавание текста с камеры: Google ML Kit. Движок перевода: transformers.js и ONNX Runtime (Apache 2.0/MIT).\n" +
+                    "Весь звук и все фото обрабатываются только на телефоне и никуда не отправляются.",
+                fontSize = 12.sp,
+                color = Color.Gray
+            )
         }
         item { Spacer(Modifier.height(30.dp)) }
     }
@@ -581,6 +600,40 @@ fun LangRow(vm: PhoneViewModel, code: String) {
             ready && code != "en" -> TextButton(onClick = { vm.deleteLang(code) }) { Text("✓ удалить") }
             ready -> Text("✓ встроен", color = Color.Gray)
             else -> TextButton(onClick = { vm.downloadLang(code) }) { Text("⬇ скачать") }
+        }
+    }
+}
+
+
+@Composable
+fun MtRow(vm: PhoneViewModel) {
+    val progress = vm.mtProgress
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("${Languages.name(vm.langA)} ⇄ ${Languages.name(vm.langB)}", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text(
+                        when {
+                            !vm.mtSupported -> "Для этой пары — перевод Google ML Kit"
+                            vm.mtReady -> "Скачан, работает без интернета"
+                            else -> "Точнее, чем ML Kit · ~110–450 МБ"
+                        },
+                        fontSize = 13.sp, color = Color.Gray
+                    )
+                }
+                when {
+                    !vm.mtSupported -> Unit
+                    progress != null -> Unit
+                    vm.mtReady -> Text("✓", fontSize = 20.sp, color = ColorA)
+                    else -> Button(onClick = { vm.downloadMt() }) { Text("Скачать") }
+                }
+            }
+            if (progress != null) {
+                Spacer(Modifier.height(8.dp))
+                LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
+                Text(vm.mtProgressText, fontSize = 12.sp, color = Color.Gray)
+            }
         }
     }
 }

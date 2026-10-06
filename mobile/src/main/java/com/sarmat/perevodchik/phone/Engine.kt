@@ -82,6 +82,19 @@ object Engine {
         }
     }
 
+    /** Лучший доступный перевод: Helsinki (если скачан для этой пары), иначе ML Kit. */
+    suspend fun translateBest(text: String, src: String, tgt: String): String {
+        val useHelsinki = app.getSharedPreferences("phone", Context.MODE_PRIVATE).getBoolean("helsinki", true)
+        if (useHelsinki) {
+            try {
+                val (sup, ready) = MtEngine.status(app, src, tgt)
+                if (sup && ready) MtEngine.translate(app, text, src, tgt)?.let { if (it.isNotBlank()) return it }
+            } catch (_: Exception) {
+            }
+        }
+        return TextTranslator.translate(text, src, tgt)
+    }
+
     internal fun emitWatch(e: WatchExchange) {
         _watchEvents.tryEmit(e)
     }
@@ -109,7 +122,7 @@ class BridgeService : WearableListenerService() {
                 val samples = Bridge.pcm16ToFloats(bytes, nl + 1)
                 val text = Engine.recognize(samples, src)
                 val translation =
-                    if (text.isBlank()) "" else TextTranslator.translate(text, src, tgt)
+                    if (text.isBlank()) "" else Engine.translateBest(text, src, tgt)
                 reply.put("text", text).put("translation", translation)
                 if (text.isNotBlank()) Engine.emitWatch(WatchExchange(src, tgt, text, translation))
             } catch (e: Exception) {

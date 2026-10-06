@@ -4,3 +4,7 @@ local.properties
 .idea/
 *.iml
 app/libs/
+mobile/src/main/assets/mt/vendor/
+mobile/src/main/assets/mt/ort/
+mobile/src/main/assets/mt/worker.js
+mobile/src/main/assets/mt/engine-routes.js

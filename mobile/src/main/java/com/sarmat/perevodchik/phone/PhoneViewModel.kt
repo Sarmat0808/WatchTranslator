@@ -93,9 +93,64 @@ class PhoneViewModel(app: Application) : AndroidViewModel(app), TextToSpeech.OnI
         refreshLangs()
         loadHistory()
         Engine.warmUp(langA)
+        refreshMt()
         viewModelScope.launch {
             Engine.watchEvents.collect { e ->
                 addExchange(Exchange(Side.A, e.src, e.tgt, e.text, e.translation, fromWatch = true))
+            }
+        }
+    }
+
+    // ---------- Точный перевод Helsinki OPUS-MT ----------
+
+    var useHelsinki by mutableStateOf(prefs.getBoolean("helsinki", true))
+        private set
+    var mtSupported by mutableStateOf(false)
+        private set
+    var mtReady by mutableStateOf(false)
+        private set
+    var mtProgress by mutableStateOf<Float?>(null)
+        private set
+    var mtProgressText by mutableStateOf("")
+        private set
+
+    fun refreshMt() {
+        val a = langA
+        val b = langB
+        viewModelScope.launch {
+            val (sup, rdy) = runCatching { MtEngine.status(getApplication(), a, b) }.getOrDefault(false to false)
+            if (a == langA && b == langB) {
+                mtSupported = sup
+                mtReady = rdy
+            }
+        }
+    }
+
+    fun toggleHelsinki() {
+        useHelsinki = !useHelsinki
+        prefs.edit().putBoolean("helsinki", useHelsinki).apply()
+    }
+
+    fun downloadMt() {
+        if (mtProgress != null) return
+        val a = langA
+        val b = langB
+        mtProgress = 0f
+        mtProgressText = "Подключаюсь…"
+        viewModelScope.launch {
+            try {
+                MtEngine.prepare(getApplication(), a, b) { loaded, total ->
+                    if (total > 0) viewModelScope.launch {
+                        mtProgress = loaded.toFloat() / total
+                        mtProgressText = "${loaded / 1_048_576} из ${total / 1_048_576} МБ"
+                    }
+                }
+                status = "Точный перевод готов: ${Languages.name(a)} ⇄ ${Languages.name(b)}"
+            } catch (e: Exception) {
+                status = "Не скачалось. Нужен интернет один раз (Wi‑Fi)"
+            } finally {
+                mtProgress = null
+                refreshMt()
             }
         }
     }
@@ -112,6 +167,7 @@ class PhoneViewModel(app: Application) : AndroidViewModel(app), TextToSpeech.OnI
         }
         prefs.edit().putString("a", langA).putString("b", langB).apply()
         downloadLang(code)
+        refreshMt()
     }
 
     fun swap() {
@@ -119,6 +175,7 @@ class PhoneViewModel(app: Application) : AndroidViewModel(app), TextToSpeech.OnI
         langA = langB
         langB = a
         prefs.edit().putString("a", langA).putString("b", langB).apply()
+        refreshMt()
     }
 
     fun isLangReady(code: String) = code == "en" || code in downloadedLangs
@@ -289,8 +346,17 @@ class PhoneViewModel(app: Application) : AndroidViewModel(app), TextToSpeech.OnI
         }
 
     /** Единая точка перевода текста (сюда подключается движок перевода). */
-    suspend fun translateText(text: String, src: String, tgt: String): String =
-        TextTranslator.translate(text, src, tgt)
+    suspend fun translateText(text: String, src: String, tgt: String): String {
+        val pair = setOf(src, tgt) == setOf(langA, langB)
+        if (useHelsinki && mtReady && pair) {
+            try {
+                MtEngine.translate(getApplication(), text, src, tgt)?.let { if (it.isNotBlank()) return it }
+            } catch (_: Exception) {
+                // не получилось — переводим запасным движком
+            }
+        }
+        return TextTranslator.translate(text, src, tgt)
+    }
 
     private suspend fun translateAndShow(side: Side, src: String, tgt: String, text: String) {
         busy = true
