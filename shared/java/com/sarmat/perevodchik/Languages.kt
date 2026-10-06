@@ -42,6 +42,13 @@ object Languages {
 
     fun short(code: String): String = code.uppercase()
 
+    /** Название языка на нём самом: Suomi, Български, Deutsch… */
+    fun nativeName(code: String): String {
+        val l = Locale.forLanguageTag(if (code == "no") "nb" else code)
+        val n = l.getDisplayLanguage(l)
+        return if (n.isBlank()) name(code) else n.replaceFirstChar { it.titlecase(l) }
+    }
+
     /** Локаль для синтеза речи. */
     fun ttsLocale(code: String): Locale = when (code) {
         "no" -> Locale.forLanguageTag("nb-NO")

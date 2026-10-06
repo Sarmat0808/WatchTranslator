@@ -66,6 +66,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.sarmat.perevodchik.Languages
+import com.sarmat.perevodchik.UiText
 import com.sarmat.perevodchik.OfflineVoice
 import com.sarmat.perevodchik.VoicePack
 
@@ -96,12 +97,15 @@ class PhoneActivity : ComponentActivity() {
 @Composable
 fun PhoneRoot(vm: PhoneViewModel = viewModel()) {
     var showSettings by remember { mutableStateOf(false) }
+    var showCamera by remember { mutableStateOf(false) }
     KeepScreenOn(vm.anyDownloading || vm.recordingSide != null || vm.recognizing)
-    if (showSettings) {
-        BackHandler { showSettings = false }
-        SettingsScreen(vm) { showSettings = false }
-    } else {
-        MainScreen(vm) { showSettings = true }
+    when {
+        showSettings -> {
+            BackHandler { showSettings = false }
+            SettingsScreen(vm) { showSettings = false }
+        }
+        showCamera -> CameraScreen(vm) { showCamera = false }
+        else -> MainScreen(vm, openCamera = { showCamera = true }) { showSettings = true }
     }
 }
 
@@ -116,7 +120,7 @@ fun KeepScreenOn(on: Boolean) {
 }
 
 @Composable
-fun MainScreen(vm: PhoneViewModel, openSettings: () -> Unit) {
+fun MainScreen(vm: PhoneViewModel, openCamera: () -> Unit, openSettings: () -> Unit) {
     val context = LocalContext.current
     var pendingSide by remember { mutableStateOf<Side?>(null) }
     var picking by remember { mutableStateOf<Side?>(null) }
@@ -161,6 +165,7 @@ fun MainScreen(vm: PhoneViewModel, openSettings: () -> Unit) {
             TextButton(onClick = { vm.toggleFace() }) {
                 Text(if (vm.faceToFace) "👥 Лицом" else "💬 Чат", fontSize = 15.sp)
             }
+            TextButton(onClick = openCamera) { Text("📷", fontSize = 22.sp) }
             TextButton(onClick = openSettings) { Text("⚙", fontSize = 22.sp) }
         }
 
@@ -205,7 +210,7 @@ fun MainScreen(vm: PhoneViewModel, openSettings: () -> Unit) {
         }
 
         // Запись / распознавание
-        when {
+        if (!vm.faceToFace) when {
             vm.recordingSide != null -> RecordingBar(vm)
             vm.recognizing || vm.busy -> Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -368,9 +373,11 @@ fun FaceToFace(vm: PhoneViewModel, listen: (Side) -> Unit) {
 
 @Composable
 fun HalfPanel(vm: PhoneViewModel, side: Side, onMic: () -> Unit) {
+    // Всё на этой половине — на языке того, кто с этой стороны
     val lang = if (side == Side.A) vm.langA else vm.langB
     val color = if (side == Side.A) ColorA else ColorB
     val last = vm.exchanges.lastOrNull()
+    val mine = vm.activeSide == side
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -379,7 +386,32 @@ fun HalfPanel(vm: PhoneViewModel, side: Side, onMic: () -> Unit) {
     ) {
         Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
             when {
-                last == null -> Text(Languages.name(lang), fontSize = 18.sp, color = Color.Gray)
+                mine && vm.recordingSide == side -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(
+                        modifier = Modifier
+                            .size((44 + 34 * vm.micLevel).dp)
+                            .clip(CircleShape)
+                            .background(color),
+                        contentAlignment = Alignment.Center
+                    ) { Text("🎤", fontSize = 22.sp) }
+                    Spacer(Modifier.height(10.dp))
+                    Text(UiText.listening(lang), fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(8.dp))
+                    Button(onClick = { vm.finishListening() }) { Text(UiText.done(lang)) }
+                }
+                mine && (vm.recognizing || vm.busy) -> Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(modifier = Modifier.size(26.dp), color = color)
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        if (vm.recognizing) UiText.recognizing(lang) else UiText.translating(lang),
+                        fontSize = 20.sp
+                    )
+                }
+                last == null -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(Languages.nativeName(lang), fontSize = 24.sp, fontWeight = FontWeight.Bold, color = color)
+                    Spacer(Modifier.height(6.dp))
+                    Text(UiText.tapMic(lang), fontSize = 16.sp, color = Color.Gray, textAlign = TextAlign.Center)
+                }
                 last.side != side -> Text(
                     last.translation,
                     fontSize = 26.sp,
@@ -395,7 +427,7 @@ fun HalfPanel(vm: PhoneViewModel, side: Side, onMic: () -> Unit) {
                 )
             }
         }
-        MicButton(Languages.name(lang), color, Modifier.fillMaxWidth()) { onMic() }
+        MicButton(Languages.nativeName(lang), color, Modifier.fillMaxWidth()) { onMic() }
     }
 }
 

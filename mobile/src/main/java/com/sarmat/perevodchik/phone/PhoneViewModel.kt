@@ -68,6 +68,9 @@ class PhoneViewModel(app: Application) : AndroidViewModel(app), TextToSpeech.OnI
         private set
     var micLevel by mutableStateOf(0f)
         private set
+    /** Кто сейчас говорит/ждёт перевод — чтобы показывать подсказки на его половине. */
+    var activeSide by mutableStateOf<Side?>(null)
+        private set
 
     val exchanges = mutableStateListOf<Exchange>()
 
@@ -227,6 +230,7 @@ class PhoneViewModel(app: Application) : AndroidViewModel(app), TextToSpeech.OnI
         }
         status = null
         recordingSide = side
+        activeSide = side
         micLevel = 0f
         listenJob = viewModelScope.launch {
             try {
@@ -250,6 +254,7 @@ class PhoneViewModel(app: Application) : AndroidViewModel(app), TextToSpeech.OnI
                 recordingSide = null
                 recognizing = false
                 micLevel = 0f
+                activeSide = null
             }
         }
     }
@@ -274,10 +279,23 @@ class PhoneViewModel(app: Application) : AndroidViewModel(app), TextToSpeech.OnI
         viewModelScope.launch { translateAndShow(side, src, tgt, t) }
     }
 
+    /** Перевод для камеры (без озвучки и истории). */
+    suspend fun translateForCamera(text: String, src: String, tgt: String): String =
+        try {
+            translateText(text, src, tgt)
+        } catch (e: Exception) {
+            if (!isLangReady(src) || !isLangReady(tgt)) downloadLang(if (!isLangReady(src)) src else tgt)
+            "—"
+        }
+
+    /** Единая точка перевода текста (сюда подключается движок перевода). */
+    suspend fun translateText(text: String, src: String, tgt: String): String =
+        TextTranslator.translate(text, src, tgt)
+
     private suspend fun translateAndShow(side: Side, src: String, tgt: String, text: String) {
         busy = true
         try {
-            val tr = TextTranslator.translate(text, src, tgt)
+            val tr = translateText(text, src, tgt)
             addExchange(Exchange(side, src, tgt, text, tr))
             if (autoSpeak) speak(tr, tgt)
         } catch (e: Exception) {
