@@ -13,8 +13,8 @@ android {
         applicationId = "com.sarmat.perevodchik"
         minSdk = 28
         targetSdk = 34
-        versionCode = 5
-        versionName = "4.1"
+        versionCode = 6
+        versionName = "4.2"
         ndk {
             abiFilters += listOf("arm64-v8a")
         }
@@ -61,6 +61,7 @@ dependencies {
     implementation("com.google.mlkit:translate:17.0.3")
     // Камера и офлайн-распознавание текста (модель встроена в приложение)
     implementation("com.google.mlkit:text-recognition:16.0.1")
+    implementation("com.google.mlkit:language-id:17.0.6")
     implementation("androidx.camera:camera-core:1.4.1")
     implementation("androidx.camera:camera-camera2:1.4.1")
     implementation("androidx.camera:camera-lifecycle:1.4.1")

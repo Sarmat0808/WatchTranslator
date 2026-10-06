@@ -86,7 +86,13 @@ import kotlinx.coroutines.tasks.await
 import kotlin.math.max
 
 /** Фрагмент текста на фото: где он, что написано и перевод. */
-data class TextPiece(val box: Rect, val text: String, val lines: Int, var translation: String = "")
+data class TextPiece(
+    val box: Rect,
+    val text: String,
+    val lines: Int,
+    var translation: String = "",
+    var lang: String = ""
+)
 
 /** Языки, которые камера умеет читать офлайн (латиница). */
 val CAMERA_LATIN = setOf(
@@ -112,8 +118,10 @@ fun CameraScreen(vm: PhoneViewModel, onBack: () -> Unit) {
     }
 
     // Текст на фото — на языке собеседника (страны), перевод — на мой язык
-    var src by remember { mutableStateOf(if (vm.langB in CAMERA_LATIN) vm.langB else "en") }
-    val tgt = if (src == vm.langA) vm.langB else vm.langA
+    // "auto" — язык текста определяется сам; перевод всегда на мой язык
+    var src by remember { mutableStateOf("auto") }
+    val tgt = vm.langA
+    var detected by remember { mutableStateOf<String?>(null) }
 
     var photo by remember { mutableStateOf<Bitmap?>(null) }
     var pieces by remember { mutableStateOf<List<TextPiece>>(emptyList()) }
@@ -139,7 +147,19 @@ fun CameraScreen(vm: PhoneViewModel, onBack: () -> Unit) {
                 if (found.isEmpty()) {
                     message = "Текст не найден — поднесите ближе и держите ровно"
                 } else {
-                    for (p in found) p.translation = vm.translateForCamera(p.text, src, tgt)
+                    if (src == "auto") {
+                        // Определяем язык каждого куска текста (вывеска может быть на двух языках)
+                        val all = found.joinToString(" ") { it.text }
+                        val main = detectLanguage(all, null) ?: vm.langB
+                        detected = main
+                        for (p in found) p.lang = detectLanguage(p.text, main) ?: main
+                    } else {
+                        detected = null
+                        for (p in found) p.lang = src
+                    }
+                    for (p in found) {
+                        p.translation = if (p.lang == tgt) p.text else vm.translateForCamera(p.text, p.lang, tgt)
+                    }
                     pieces = found
                 }
             } catch (e: Exception) {
@@ -187,20 +207,26 @@ fun CameraScreen(vm: PhoneViewModel, onBack: () -> Unit) {
             TextButton(onClick = onBack) { Text("←", fontSize = 22.sp) }
             Text("Перевод с камеры", fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
         }
-        // Направление: с какого языка читаем
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Текст на: ", color = Color.Gray)
-            for (code in listOf(vm.langB, vm.langA, "en").distinct().filter { it in CAMERA_LATIN }) {
+        // Язык текста: «Авто» определяет сам; можно выбрать вручную
+        androidx.compose.foundation.lazy.LazyRow(verticalAlignment = Alignment.CenterVertically) {
+            val options = listOf("auto") + listOf(vm.langB, "en", "fi", "sv", "de").distinct().filter { it in CAMERA_LATIN && it != tgt }
+            items(options) { code ->
                 val sel = code == src
                 OutlinedButton(
                     onClick = { src = code; photo?.let { analyze(it) } },
                     colors = if (sel) ButtonDefaults.outlinedButtonColors(containerColor = ColorB, contentColor = Color.Black)
                     else ButtonDefaults.outlinedButtonColors(),
                     modifier = Modifier.padding(end = 6.dp)
-                ) { Text(Languages.name(code)) }
+                ) { Text(if (code == "auto") "🔍 Авто" else Languages.name(code)) }
             }
         }
-        Text("→ перевод на: ${Languages.name(tgt)}", color = Color.Gray, fontSize = 13.sp)
+        Text(
+            buildString {
+                if (src == "auto" && detected != null) append("Определён: ${Languages.name(detected!!)}  ")
+                append("→ перевод на: ${Languages.name(tgt)}")
+            },
+            color = Color.Gray, fontSize = 13.sp
+        )
         Spacer(Modifier.height(6.dp))
 
         if (!granted) {
@@ -214,7 +240,7 @@ fun CameraScreen(vm: PhoneViewModel, onBack: () -> Unit) {
         if (shown != null && pieces.isNotEmpty()) {
             // Результат: вкладки «Текст» (крупно, копировать, отправить) и «Фото» (увеличение пальцами)
             Row(Modifier.fillMaxWidth()) {
-                for ((i, label) in listOf("📄 Текст", "🖼 Фото").withIndex()) {
+                for ((i, label) in listOf("🖼 Фото", "📄 Текст").withIndex()) {
                     val sel = tab == i
                     Button(
                         onClick = { tab = i },
@@ -227,9 +253,9 @@ fun CameraScreen(vm: PhoneViewModel, onBack: () -> Unit) {
             Spacer(Modifier.height(6.dp))
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 if (tab == 0) {
-                    ResultText(vm, pieces, tgt, fontSize, showOriginal)
-                } else {
                     ZoomablePhoto(shown, pieces)
+                } else {
+                    ResultText(vm, pieces, tgt, fontSize, showOriginal)
                 }
             }
             // Панель действий
@@ -238,14 +264,14 @@ fun CameraScreen(vm: PhoneViewModel, onBack: () -> Unit) {
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (tab == 0) {
+                if (tab == 1) {
                     TextButton(onClick = { fontSize = (fontSize - 3).coerceAtLeast(14) }) { Text("A−", fontSize = 18.sp) }
                     TextButton(onClick = { fontSize = (fontSize + 3).coerceAtMost(44) }) { Text("A+", fontSize = 22.sp) }
                     TextButton(onClick = { showOriginal = !showOriginal }) { Text(if (showOriginal) "Без ориг." else "+ ориг.") }
                 }
                 TextButton(onClick = { copyText(context, fullText(pieces, showOriginal)) }) { Text("📋", fontSize = 22.sp) }
                 TextButton(onClick = {
-                    if (tab == 0) shareText(context, fullText(pieces, showOriginal))
+                    if (tab == 1) shareText(context, fullText(pieces, showOriginal))
                     else sharePhoto(context, shown, pieces)
                 }) { Text("📤", fontSize = 22.sp) }
                 TextButton(onClick = { vm.speak(pieces.joinToString(". ") { it.translation }, tgt) }) { Text("🔊", fontSize = 22.sp) }
@@ -513,5 +539,36 @@ private fun loadBitmap(context: Context, uri: android.net.Uri): Bitmap {
             decoder.setTargetSize((info.size.width * k).toInt(), (info.size.height * k).toInt())
         }
         decoder.allocator = android.graphics.ImageDecoder.ALLOCATOR_SOFTWARE
+    }
+}
+
+
+private val languageId by lazy {
+    com.google.mlkit.nl.languageid.LanguageIdentification.getClient(
+        com.google.mlkit.nl.languageid.LanguageIdentificationOptions.Builder()
+            .setConfidenceThreshold(0.3f)
+            .build()
+    )
+}
+
+/**
+ * Офлайн-определение языка текста. Для коротких надписей (кнопки, адреса) доверяем
+ * только уверенному ответу, иначе берём язык всего фото (fallback).
+ */
+suspend fun detectLanguage(text: String, fallback: String?): String? {
+    val clean = text.replace(Regex("[0-9/:._%?=&#@-]+"), " ").trim()
+    if (clean.count { it.isLetter() } < 4) return fallback
+    return try {
+        val options = languageId.identifyPossibleLanguages(clean).await()
+        val best = options
+            .map { (if (it.languageTag == "nb" || it.languageTag == "nn") "no" else it.languageTag) to it.confidence }
+            .firstOrNull { (tag, _) -> tag in Languages.all && tag != "und" }
+        when {
+            best == null -> fallback
+            fallback != null && clean.length < 25 && best.second < 0.7f -> fallback
+            else -> best.first
+        }
+    } catch (e: Exception) {
+        fallback
     }
 }
