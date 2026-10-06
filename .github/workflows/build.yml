@@ -9,6 +9,7 @@ on:
       - web/**
       - .github/workflows/web.yml
       - .github/workflows/probe.yml
+      - .github/workflows/voices.yml
   workflow_dispatch:
 
 env:

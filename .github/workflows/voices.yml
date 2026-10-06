@@ -1,0 +1,44 @@
+name: Voice quality ranking
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - tools/voice_rank.py
+      - .github/workflows/voices.yml
+
+env:
+  CI: "true"
+  PIP_NO_INPUT: "1"
+
+jobs:
+  rank:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Models
+        timeout-minutes: 15
+        run: |
+          set -e
+          base=https://github.com/k2-fsa/sherpa-onnx/releases/download
+          curl -sSL $base/tts-models/sherpa-onnx-supertonic-3-tts-int8-2026-05-11.tar.bz2 | tar xjf -
+          curl -sSL $base/asr-models/sherpa-onnx-whisper-turbo.tar.bz2 | tar xjf -
+      - name: Rank voices
+        timeout-minutes: 40
+        run: |
+          set -o pipefail
+          pip install -q sherpa-onnx==1.13.8 numpy scipy
+          mkdir -p out
+          python tools/voice_rank.py < /dev/null 2>&1 | tee out/voice-rank.txt
+      - uses: softprops/action-gh-release@v2
+        if: always()
+        with:
+          tag_name: ci-log
+          make_latest: false
+          files: out/voice-rank.txt
