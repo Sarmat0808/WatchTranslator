@@ -129,6 +129,7 @@ fun CameraScreen(vm: PhoneViewModel, onBack: () -> Unit) {
     var message by remember { mutableStateOf<String?>(null) }
     var tab by remember { mutableStateOf(0) }
     var done by remember { mutableStateOf(0) }
+    var fullScreen by remember { mutableStateOf(false) }
     var total by remember { mutableStateOf(0) }
     var fontSize by remember { mutableStateOf(22) }
     var showOriginal by remember { mutableStateOf(false) }
@@ -219,33 +220,38 @@ fun CameraScreen(vm: PhoneViewModel, onBack: () -> Unit) {
         modifier = Modifier
             .fillMaxSize()
             .safeDrawingPadding()
-            .padding(horizontal = 12.dp)
+            .padding(horizontal = 6.dp)
     ) {
+        // Компактная шапка: назад + язык текста в одну строку — больше места для фото
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-            TextButton(onClick = onBack) { Text("←", fontSize = 22.sp) }
-            Text("Перевод с камеры", fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-        }
-        // Язык текста: «Авто» определяет сам; можно выбрать вручную
-        androidx.compose.foundation.lazy.LazyRow(verticalAlignment = Alignment.CenterVertically) {
-            val options = listOf("auto") + listOf(vm.langB, "en", "fi", "sv", "de").distinct().filter { it in CAMERA_LATIN && it != tgt }
-            items(options) { code ->
-                val sel = code == src
-                OutlinedButton(
-                    onClick = { src = code; photo?.let { analyze(it) } },
-                    colors = if (sel) ButtonDefaults.outlinedButtonColors(containerColor = ColorB, contentColor = Color.Black)
-                    else ButtonDefaults.outlinedButtonColors(),
-                    modifier = Modifier.padding(end = 6.dp)
-                ) { Text(if (code == "auto") "🔍 Авто" else Languages.name(code)) }
+            TextButton(onClick = onBack, contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+                modifier = Modifier.size(40.dp)) { Text("←", fontSize = 22.sp) }
+            androidx.compose.foundation.lazy.LazyRow(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f)
+            ) {
+                val options = listOf("auto") + listOf(vm.langB, "en", "fi", "sv", "de").distinct().filter { it in CAMERA_LATIN && it != tgt }
+                items(options) { code ->
+                    val sel = code == src
+                    OutlinedButton(
+                        onClick = { src = code; photo?.let { analyze(it) } },
+                        colors = if (sel) ButtonDefaults.outlinedButtonColors(containerColor = ColorB, contentColor = Color.Black)
+                        else ButtonDefaults.outlinedButtonColors(),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                        modifier = Modifier.padding(end = 4.dp).height(36.dp)
+                    ) { Text(if (code == "auto") "🔍 Авто" else Languages.name(code), fontSize = 14.sp) }
+                }
             }
         }
         Text(
             buildString {
-                if (src == "auto" && detected != null) append("Определён: ${Languages.name(detected!!)}  ")
-                append("→ перевод на: ${Languages.name(tgt)}")
+                if (src == "auto" && detected != null) append("${Languages.name(detected!!)} → ") else append("→ ")
+                append(Languages.name(tgt))
+                if (done < total) append("   · перевожу $done из $total")
             },
-            color = Color.Gray, fontSize = 13.sp
+            color = if (done < total) ColorB else Color.Gray, fontSize = 12.sp, maxLines = 1
         )
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(4.dp))
 
         if (!granted) {
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -256,51 +262,53 @@ fun CameraScreen(vm: PhoneViewModel, onBack: () -> Unit) {
 
         val shown = photo
         if (shown != null && pieces.isNotEmpty()) {
-            // Результат: вкладки «Текст» (крупно, копировать, отправить) и «Фото» (увеличение пальцами)
-            Row(Modifier.fillMaxWidth()) {
-                for ((i, label) in listOf("🖼 Фото", "📄 Текст").withIndex()) {
-                    val sel = tab == i
-                    Button(
-                        onClick = { tab = i },
-                        colors = if (sel) ButtonDefaults.buttonColors(containerColor = ColorA)
-                        else ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surface, contentColor = Color.White),
-                        modifier = Modifier.weight(1f).padding(horizontal = 3.dp)
-                    ) { Text(label, fontSize = 16.sp) }
-                }
-            }
-            if (done < total) {
-                Text("Перевожу… $done из $total", color = ColorB, fontSize = 14.sp, modifier = Modifier.padding(top = 4.dp))
-            }
-            Spacer(Modifier.height(6.dp))
+            // Результат: фото занимает почти весь экран
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 if (tab == 0) {
-                    ZoomablePhoto(shown, pieces)
+                    ZoomablePhoto(shown, pieces) { fullScreen = true }
                 } else {
                     ResultText(vm, pieces, tgt, fontSize, showOriginal)
                 }
             }
-            // Панель действий
+            // Одна нижняя панель: вкладки + действия
             Row(
-                Modifier.fillMaxWidth().padding(top = 6.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically
+                Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                if (tab == 1) {
-                    TextButton(onClick = { fontSize = (fontSize - 3).coerceAtLeast(14) }) { Text("A−", fontSize = 18.sp) }
-                    TextButton(onClick = { fontSize = (fontSize + 3).coerceAtMost(44) }) { Text("A+", fontSize = 22.sp) }
-                    TextButton(onClick = { showOriginal = !showOriginal }) { Text(if (showOriginal) "Без ориг." else "+ ориг.") }
+                val small = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                for ((i, label) in listOf("🖼", "📄").withIndex()) {
+                    Button(
+                        onClick = { tab = i },
+                        contentPadding = small,
+                        colors = if (tab == i) ButtonDefaults.buttonColors(containerColor = ColorA)
+                        else ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surface, contentColor = Color.White),
+                        modifier = Modifier.height(44.dp).padding(end = 4.dp)
+                    ) { Text(if (i == 0) "$label Фото" else "$label Текст", fontSize = 14.sp) }
                 }
-                TextButton(onClick = { copyText(context, fullText(pieces, showOriginal)) }) { Text("📋", fontSize = 22.sp) }
+                if (tab == 1) {
+                    TextButton(onClick = { fontSize = (fontSize - 3).coerceAtLeast(14) }, contentPadding = small) { Text("A−", fontSize = 16.sp) }
+                    TextButton(onClick = { fontSize = (fontSize + 3).coerceAtMost(44) }, contentPadding = small) { Text("A+", fontSize = 19.sp) }
+                } else {
+                    TextButton(onClick = { fullScreen = true }, contentPadding = small) { Text("⛶", fontSize = 22.sp) }
+                }
+                TextButton(onClick = { copyText(context, fullText(pieces, showOriginal)) }, contentPadding = small) { Text("📋", fontSize = 20.sp) }
                 TextButton(onClick = {
                     if (tab == 1) shareText(context, fullText(pieces, showOriginal))
                     else sharePhoto(context, shown, pieces)
-                }) { Text("📤", fontSize = 22.sp) }
-                TextButton(onClick = { vm.speak(pieces.joinToString(". ") { it.translation }, tgt) }) { Text("🔊", fontSize = 22.sp) }
-            }
-            Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.Center) {
-                Button(onClick = { photo = null; pieces = emptyList(); message = null; tab = 0 }) {
-                    Text("📷 Новое фото")
+                }, contentPadding = small) { Text("📤", fontSize = 20.sp) }
+                TextButton(onClick = { photo = null; pieces = emptyList(); message = null; tab = 0 }, contentPadding = small) {
+                    Text("📷", fontSize = 22.sp)
                 }
+            }
+            if (tab == 1) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                    TextButton(onClick = { showOriginal = !showOriginal }) { Text(if (showOriginal) "Скрыть оригинал" else "Показать оригинал") }
+                    TextButton(onClick = { vm.speak(pieces.joinToString(". ") { it.translation }, tgt) }) { Text("🔊 Прочитать") }
+                }
+            }
+            if (fullScreen) {
+                FullScreenPhoto(shown, pieces) { fullScreen = false }
             }
         } else {
             Box(
@@ -407,13 +415,13 @@ private fun ResultText(vm: PhoneViewModel, pieces: List<TextPiece>, tgt: String,
 
 /** Фото с переводом поверх текста. Увеличение двумя пальцами, двойное касание — сброс. */
 @Composable
-private fun ZoomablePhoto(bmp: Bitmap, pieces: List<TextPiece>) {
+private fun ZoomablePhoto(bmp: Bitmap, pieces: List<TextPiece>, rounded: Boolean = true, onExpand: (() -> Unit)? = null) {
     var zoom by remember { mutableStateOf(1f) }
     var pan by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
     Box(
         Modifier
             .fillMaxSize()
-            .clip(RoundedCornerShape(18.dp))
+            .clip(RoundedCornerShape(if (rounded) 18.dp else 0.dp))
             .background(Color.Black)
             .pointerInput(Unit) {
                 detectTapGestures(onDoubleTap = {
@@ -576,5 +584,26 @@ suspend fun detectLanguage(text: String, fallback: String?): String? {
         }
     } catch (e: Exception) {
         fallback
+    }
+}
+
+
+/** Фото на весь экран (без шапки и кнопок) — удобно читать. */
+@Composable
+private fun FullScreenPhoto(bmp: Bitmap, pieces: List<TextPiece>, onClose: () -> Unit) {
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onClose,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
+    ) {
+        Box(Modifier.fillMaxSize().background(Color.Black)) {
+            ZoomablePhoto(bmp, pieces, rounded = false)
+            Button(
+                onClick = onClose,
+                shape = CircleShape,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xAA000000), contentColor = Color.White),
+                modifier = Modifier.align(Alignment.TopEnd).safeDrawingPadding().padding(10.dp).size(52.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
+            ) { Text("✕", fontSize = 22.sp) }
+        }
     }
 }
