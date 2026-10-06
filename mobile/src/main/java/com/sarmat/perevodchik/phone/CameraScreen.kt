@@ -1,6 +1,17 @@
 package com.sarmat.perevodchik.phone
 
 import android.Manifest
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
+import android.widget.Toast
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.core.content.FileProvider
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Matrix
@@ -108,6 +119,9 @@ fun CameraScreen(vm: PhoneViewModel, onBack: () -> Unit) {
     var pieces by remember { mutableStateOf<List<TextPiece>>(emptyList()) }
     var working by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
+    var tab by remember { mutableStateOf(0) }
+    var fontSize by remember { mutableStateOf(22) }
+    var showOriginal by remember { mutableStateOf(false) }
     val capture = remember { ImageCapture.Builder().setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY).build() }
 
     fun analyze(bmp: Bitmap) {
@@ -120,8 +134,8 @@ fun CameraScreen(vm: PhoneViewModel, onBack: () -> Unit) {
                 val found = result.textBlocks.mapNotNull { b ->
                     val box = b.boundingBox ?: return@mapNotNull null
                     val t = b.lines.joinToString(" ") { it.text }.trim()
-                    if (t.length < 2) null else TextPiece(box, t, max(1, b.lines.size))
-                }
+                    if (t.count { it.isLetter() } < 3) null else TextPiece(box, t, max(1, b.lines.size))
+                }.sortedWith(compareBy({ it.box.top / 40 }, { it.box.left }))
                 if (found.isEmpty()) {
                     message = "Текст не найден — поднесите ближе и держите ровно"
                 } else {
@@ -133,6 +147,16 @@ fun CameraScreen(vm: PhoneViewModel, onBack: () -> Unit) {
             } finally {
                 working = false
             }
+        }
+    }
+
+    val gallery = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) {
+            val bmp = runCatching { loadBitmap(context, uri) }.getOrNull()
+            if (bmp != null) {
+                photo = bmp
+                analyze(bmp)
+            } else message = "Не удалось открыть фото"
         }
     }
 
@@ -186,77 +210,104 @@ fun CameraScreen(vm: PhoneViewModel, onBack: () -> Unit) {
             return@Column
         }
 
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(18.dp))
-                .background(Color.Black)
-        ) {
-            val shown = photo
-            if (shown == null) {
-                // Живое изображение с камеры
-                AndroidView(
-                    factory = { ctx ->
-                        val view = PreviewView(ctx).apply { scaleType = PreviewView.ScaleType.FIT_CENTER }
-                        val providerFuture = ProcessCameraProvider.getInstance(ctx)
-                        providerFuture.addListener({
-                            val provider = providerFuture.get()
-                            val preview = Preview.Builder().build().also { it.setSurfaceProvider(view.surfaceProvider) }
-                            provider.unbindAll()
-                            provider.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, capture)
-                        }, ContextCompat.getMainExecutor(ctx))
-                        view
-                    },
-                    modifier = Modifier.fillMaxSize()
-                )
-            } else {
-                PhotoWithOverlay(shown, pieces)
-            }
-            if (working) {
-                Box(Modifier.fillMaxSize().background(Color(0x66000000)), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = ColorB)
+        val shown = photo
+        if (shown != null && pieces.isNotEmpty()) {
+            // Результат: вкладки «Текст» (крупно, копировать, отправить) и «Фото» (увеличение пальцами)
+            Row(Modifier.fillMaxWidth()) {
+                for ((i, label) in listOf("📄 Текст", "🖼 Фото").withIndex()) {
+                    val sel = tab == i
+                    Button(
+                        onClick = { tab = i },
+                        colors = if (sel) ButtonDefaults.buttonColors(containerColor = ColorA)
+                        else ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surface, contentColor = Color.White),
+                        modifier = Modifier.weight(1f).padding(horizontal = 3.dp)
+                    ) { Text(label, fontSize = 16.sp) }
                 }
             }
-        }
-
-        message?.let { Text(it, color = MaterialTheme.colorScheme.secondary, modifier = Modifier.padding(top = 6.dp)) }
-
-        if (photo != null && pieces.isNotEmpty()) {
-            LazyColumn(
-                modifier = Modifier.height(160.dp).padding(top = 6.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+            Spacer(Modifier.height(6.dp))
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                if (tab == 0) {
+                    ResultText(vm, pieces, tgt, fontSize, showOriginal)
+                } else {
+                    ZoomablePhoto(shown, pieces)
+                }
+            }
+            // Панель действий
+            Row(
+                Modifier.fillMaxWidth().padding(top = 6.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                items(pieces) { p ->
-                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-                        Column(Modifier.padding(10.dp)) {
-                            Text(p.text, color = Color.Gray, fontSize = 13.sp)
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(p.translation, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
-                                    color = ColorA, modifier = Modifier.weight(1f))
-                                TextButton(onClick = { vm.speak(p.translation, tgt) }) { Text("🔊") }
-                            }
-                        }
+                if (tab == 0) {
+                    TextButton(onClick = { fontSize = (fontSize - 3).coerceAtLeast(14) }) { Text("A−", fontSize = 18.sp) }
+                    TextButton(onClick = { fontSize = (fontSize + 3).coerceAtMost(44) }) { Text("A+", fontSize = 22.sp) }
+                    TextButton(onClick = { showOriginal = !showOriginal }) { Text(if (showOriginal) "Без ориг." else "+ ориг.") }
+                }
+                TextButton(onClick = { copyText(context, fullText(pieces, showOriginal)) }) { Text("📋", fontSize = 22.sp) }
+                TextButton(onClick = {
+                    if (tab == 0) shareText(context, fullText(pieces, showOriginal))
+                    else sharePhoto(context, shown, pieces)
+                }) { Text("📤", fontSize = 22.sp) }
+                TextButton(onClick = { vm.speak(pieces.joinToString(". ") { it.translation }, tgt) }) { Text("🔊", fontSize = 22.sp) }
+            }
+            Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.Center) {
+                Button(onClick = { photo = null; pieces = emptyList(); message = null; tab = 0 }) {
+                    Text("📷 Новое фото")
+                }
+            }
+        } else {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(Color.Black)
+            ) {
+                if (shown == null) {
+                    // Живое изображение с камеры
+                    AndroidView(
+                        factory = { ctx ->
+                            val view = PreviewView(ctx).apply { scaleType = PreviewView.ScaleType.FIT_CENTER }
+                            val providerFuture = ProcessCameraProvider.getInstance(ctx)
+                            providerFuture.addListener({
+                                val provider = providerFuture.get()
+                                val preview = Preview.Builder().build().also { it.setSurfaceProvider(view.surfaceProvider) }
+                                provider.unbindAll()
+                                provider.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, capture)
+                            }, ContextCompat.getMainExecutor(ctx))
+                            view
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Image(bitmap = shown.asImageBitmap(), contentDescription = null, modifier = Modifier.fillMaxSize())
+                }
+                if (working) {
+                    Box(Modifier.fillMaxSize().background(Color(0x66000000)), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = ColorB)
                     }
                 }
             }
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
-            horizontalArrangement = Arrangement.Center
-        ) {
-            if (photo == null) {
-                Button(
-                    onClick = { shoot() },
-                    enabled = !working,
-                    shape = CircleShape,
-                    colors = ButtonDefaults.buttonColors(containerColor = ColorB, contentColor = Color.Black),
-                    modifier = Modifier.size(78.dp)
-                ) { Text("📷", fontSize = 28.sp) }
-            } else {
-                Button(onClick = { photo = null; pieces = emptyList(); message = null }) {
-                    Text("📷 Новое фото")
+            message?.let { Text(it, color = MaterialTheme.colorScheme.secondary, modifier = Modifier.padding(top = 6.dp)) }
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (shown == null) {
+                    OutlinedButton(onClick = {
+                        gallery.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                    }) { Text("🖼 Галерея") }
+                    Button(
+                        onClick = { shoot() },
+                        enabled = !working,
+                        shape = CircleShape,
+                        colors = ButtonDefaults.buttonColors(containerColor = ColorB, contentColor = Color.Black),
+                        modifier = Modifier.size(78.dp)
+                    ) { Text("📷", fontSize = 28.sp) }
+                    Spacer(Modifier.width(90.dp))
+                } else {
+                    Button(onClick = { photo = null; pieces = emptyList(); message = null }) { Text("📷 Новое фото") }
                 }
             }
         }
@@ -315,4 +366,152 @@ private fun ImageProxy.toUprightBitmap(): Bitmap {
     if (deg == 0) return raw
     val m = Matrix().apply { postRotate(deg.toFloat()) }
     return Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, m, true)
+}
+
+
+/** Весь перевод одним текстом (по порядку чтения). */
+fun fullText(pieces: List<TextPiece>, withOriginal: Boolean): String =
+    pieces.joinToString("\n\n") { if (withOriginal) "${it.text}\n→ ${it.translation}" else it.translation }
+
+/** Крупный текст перевода: можно выделить пальцем и скопировать любую часть. */
+@Composable
+private fun ResultText(vm: PhoneViewModel, pieces: List<TextPiece>, tgt: String, fontSize: Int, showOriginal: Boolean) {
+    androidx.compose.foundation.text.selection.SelectionContainer {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .clip(RoundedCornerShape(18.dp))
+                .background(MaterialTheme.colorScheme.surface)
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            items(pieces) { p ->
+                Column {
+                    if (showOriginal) {
+                        Text(p.text, color = Color.Gray, fontSize = (fontSize * 0.7f).sp, lineHeight = (fontSize * 0.9f).sp)
+                        Spacer(Modifier.height(4.dp))
+                    }
+                    Text(
+                        p.translation,
+                        color = Color.White,
+                        fontSize = fontSize.sp,
+                        lineHeight = (fontSize * 1.3f).sp
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Фото с переводом поверх текста. Увеличение двумя пальцами, двойное касание — сброс. */
+@Composable
+private fun ZoomablePhoto(bmp: Bitmap, pieces: List<TextPiece>) {
+    var zoom by remember { mutableStateOf(1f) }
+    var pan by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
+    Box(
+        Modifier
+            .fillMaxSize()
+            .clip(RoundedCornerShape(18.dp))
+            .background(Color.Black)
+            .pointerInput(Unit) {
+                detectTapGestures(onDoubleTap = {
+                    if (zoom > 1.1f) { zoom = 1f; pan = androidx.compose.ui.geometry.Offset.Zero } else zoom = 2.5f
+                })
+            }
+            .pointerInput(Unit) {
+                detectTransformGestures { _, p, z, _ ->
+                    zoom = (zoom * z).coerceIn(1f, 6f)
+                    pan = if (zoom == 1f) androidx.compose.ui.geometry.Offset.Zero else pan + p
+                }
+            }
+    ) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .graphicsLayer(scaleX = zoom, scaleY = zoom, translationX = pan.x, translationY = pan.y)
+        ) {
+            PhotoWithOverlay(bmp, pieces)
+        }
+        if (zoom == 1f) {
+            Text(
+                "Увеличьте двумя пальцами",
+                color = Color.White,
+                fontSize = 12.sp,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(6.dp)
+                    .background(Color(0x99000000), RoundedCornerShape(8.dp))
+                    .padding(horizontal = 8.dp, vertical = 3.dp)
+            )
+        }
+    }
+}
+
+private fun copyText(context: Context, text: String) {
+    val cm = context.getSystemService(ClipboardManager::class.java)
+    cm.setPrimaryClip(ClipData.newPlainText("Перевод", text))
+    Toast.makeText(context, "Скопировано", Toast.LENGTH_SHORT).show()
+}
+
+/** Отправить текст в любое приложение: WhatsApp, Telegram, почта… */
+private fun shareText(context: Context, text: String) {
+    val send = Intent(Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(Intent.EXTRA_TEXT, text)
+    }
+    context.startActivity(Intent.createChooser(send, "Отправить перевод"))
+}
+
+/** Отправить фото с нарисованным поверх переводом. */
+private fun sharePhoto(context: Context, bmp: Bitmap, pieces: List<TextPiece>) {
+    val out = bmp.copy(Bitmap.Config.ARGB_8888, true)
+    val canvas = android.graphics.Canvas(out)
+    val bg = android.graphics.Paint().apply { color = android.graphics.Color.argb(235, 255, 255, 255) }
+    for (p in pieces) {
+        val r = android.graphics.RectF(p.box)
+        canvas.drawRoundRect(r, 8f, 8f, bg)
+        var size = (p.box.height().toFloat() / p.lines) * 0.62f
+        val paint = android.text.TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.BLACK
+            isFakeBoldText = true
+        }
+        // Подбираем размер шрифта, чтобы перевод поместился в рамку
+        var layout: android.text.StaticLayout
+        while (true) {
+            paint.textSize = size.coerceAtLeast(10f)
+            layout = android.text.StaticLayout.Builder
+                .obtain(p.translation, 0, p.translation.length, paint, p.box.width().coerceAtLeast(20))
+                .build()
+            if (layout.height <= p.box.height() || size <= 10f) break
+            size *= 0.9f
+        }
+        canvas.save()
+        canvas.translate(p.box.left.toFloat(), p.box.top.toFloat())
+        layout.draw(canvas)
+        canvas.restore()
+    }
+    val dir = java.io.File(context.cacheDir, "shared").apply { mkdirs() }
+    val file = java.io.File(dir, "perevod.jpg")
+    file.outputStream().use { out.compress(Bitmap.CompressFormat.JPEG, 90, it) }
+    val uri = FileProvider.getUriForFile(context, context.packageName + ".files", file)
+    val send = Intent(Intent.ACTION_SEND).apply {
+        type = "image/jpeg"
+        putExtra(Intent.EXTRA_STREAM, uri)
+        putExtra(Intent.EXTRA_TEXT, fullText(pieces, false))
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    context.startActivity(Intent.createChooser(send, "Отправить фото с переводом"))
+}
+
+/** Фото из галереи (уменьшенное, правильно повёрнутое). */
+private fun loadBitmap(context: Context, uri: android.net.Uri): Bitmap {
+    val src = android.graphics.ImageDecoder.createSource(context.contentResolver, uri)
+    return android.graphics.ImageDecoder.decodeBitmap(src) { decoder, info, _ ->
+        val maxSide = maxOf(info.size.width, info.size.height)
+        if (maxSide > 2400) {
+            val k = 2400f / maxSide
+            decoder.setTargetSize((info.size.width * k).toInt(), (info.size.height * k).toInt())
+        }
+        decoder.allocator = android.graphics.ImageDecoder.ALLOCATOR_SOFTWARE
+    }
 }

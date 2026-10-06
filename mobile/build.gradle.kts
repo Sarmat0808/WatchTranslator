@@ -13,8 +13,8 @@ android {
         applicationId = "com.sarmat.perevodchik"
         minSdk = 28
         targetSdk = 34
-        versionCode = 4
-        versionName = "4.0"
+        versionCode = 5
+        versionName = "4.1"
         ndk {
             abiFilters += listOf("arm64-v8a")
         }
