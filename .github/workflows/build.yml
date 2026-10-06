@@ -10,6 +10,7 @@ on:
       - .github/workflows/web.yml
       - .github/workflows/probe.yml
       - .github/workflows/voices.yml
+      - .github/workflows/mttest.yml
   workflow_dispatch:
 
 env:

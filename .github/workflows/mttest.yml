@@ -1,0 +1,37 @@
+name: Phone translation engine test
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - mobile/src/main/assets/mt/**
+      - tools/mttest.mjs
+      - tools/build_mt_assets.sh
+      - .github/workflows/mttest.yml
+env:
+  CI: "true"
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Engine assets
+        run: bash tools/build_mt_assets.sh < /dev/null
+      - name: Test
+        timeout-minutes: 20
+        run: |
+          set -o pipefail
+          cd tools/webbuild && npm install --no-audit --no-fund --no-progress playwright@1 < /dev/null && npx --yes playwright install --with-deps chromium && cd ../..
+          mkdir -p out
+          timeout --signal=KILL 18m node tools/mttest.mjs < /dev/null 2>&1 | tee out/mttest.log
+      - uses: softprops/action-gh-release@v2
+        if: always()
+        with:
+          tag_name: ci-log
+          make_latest: false
+          files: out/mttest.log
