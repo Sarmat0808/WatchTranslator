@@ -486,6 +486,9 @@ fun SettingsScreen(vm: PhoneViewModel, onBack: () -> Unit) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = onBack) { Text("←", fontSize = 22.sp) }
                 Text("Настройки", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                val ctx = LocalContext.current
+                val ver = remember { runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() ?: "" }
+                Text("  версия $ver", fontSize = 14.sp, color = Color.Gray)
             }
         }
         item { Section("Офлайн-пакеты (скачать один раз по Wi‑Fi)") }

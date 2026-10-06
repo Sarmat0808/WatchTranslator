@@ -128,6 +128,8 @@ fun CameraScreen(vm: PhoneViewModel, onBack: () -> Unit) {
     var working by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
     var tab by remember { mutableStateOf(0) }
+    var done by remember { mutableStateOf(0) }
+    var total by remember { mutableStateOf(0) }
     var fontSize by remember { mutableStateOf(22) }
     var showOriginal by remember { mutableStateOf(false) }
     val capture = remember { ImageCapture.Builder().setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY).build() }
@@ -147,6 +149,7 @@ fun CameraScreen(vm: PhoneViewModel, onBack: () -> Unit) {
                 if (found.isEmpty()) {
                     message = "Текст не найден — поднесите ближе и держите ровно"
                 } else {
+                    working = true
                     if (src == "auto") {
                         // Определяем язык каждого куска текста (вывеска может быть на двух языках)
                         val all = found.joinToString(" ") { it.text }
@@ -157,10 +160,25 @@ fun CameraScreen(vm: PhoneViewModel, onBack: () -> Unit) {
                         detected = null
                         for (p in found) p.lang = src
                     }
-                    for (p in found) {
-                        p.translation = if (p.lang == tgt) p.text else vm.translateForCamera(p.text, p.lang, tgt)
+                    // Сразу показываем фото, перевод появляется по кусочкам
+                    tab = 0
+                    pieces = found.map { it.copy(translation = "") }
+                    done = 0
+                    total = found.size
+                    // Сначала длинные фразы (главное), потом короткие подписи
+                    val order = found.indices.sortedByDescending { found[it].text.length }
+                    for (i in order) {
+                        val p = found[i]
+                        val tr = when {
+                            p.lang == tgt -> p.text
+                            // короткие подписи — быстрым переводчиком, фразы — точным
+                            p.text.split(' ').size <= 3 -> vm.translateFast(p.text, p.lang, tgt)
+                            else -> vm.translateForCamera(p.text, p.lang, tgt)
+                        }
+                        pieces = pieces.toMutableList().also { it[i] = p.copy(translation = tr) }
+                        done++
+                        working = false
                     }
-                    pieces = found
                 }
             } catch (e: Exception) {
                 message = "Ошибка: ${e.localizedMessage ?: ""}"
@@ -249,6 +267,9 @@ fun CameraScreen(vm: PhoneViewModel, onBack: () -> Unit) {
                         modifier = Modifier.weight(1f).padding(horizontal = 3.dp)
                     ) { Text(label, fontSize = 16.sp) }
                 }
+            }
+            if (done < total) {
+                Text("Перевожу… $done из $total", color = ColorB, fontSize = 14.sp, modifier = Modifier.padding(top = 4.dp))
             }
             Spacer(Modifier.height(6.dp))
             Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -340,51 +361,6 @@ fun CameraScreen(vm: PhoneViewModel, onBack: () -> Unit) {
     }
 }
 
-/** Фото, на котором поверх найденного текста написан перевод. */
-@Composable
-private fun PhotoWithOverlay(bmp: Bitmap, pieces: List<TextPiece>) {
-    BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        val density = LocalDensity.current
-        val boxW = with(density) { maxWidth.toPx() }
-        val boxH = with(density) { maxHeight.toPx() }
-        val scale = minOf(boxW / bmp.width, boxH / bmp.height)
-        val imgW = bmp.width * scale
-        val imgH = bmp.height * scale
-        val left = (boxW - imgW) / 2
-        val top = (boxH - imgH) / 2
-        Box(Modifier.fillMaxSize()) {
-            Image(
-                bitmap = bmp.asImageBitmap(),
-                contentDescription = null,
-                contentScale = ContentScale.Fit,
-                modifier = Modifier.fillMaxSize()
-            )
-            for (p in pieces) {
-                val x = left + p.box.left * scale
-                val y = top + p.box.top * scale
-                val w = p.box.width() * scale
-                val h = p.box.height() * scale
-                val fontPx = (h / p.lines) * 0.62f
-                Box(
-                    modifier = Modifier
-                        .offset { IntOffset(x.toInt(), y.toInt()) }
-                        .size(with(density) { w.toDp() }, with(density) { h.toDp() })
-                        .background(Color(0xE6FFFFFF), RoundedCornerShape(4.dp))
-                        .padding(2.dp)
-                ) {
-                    Text(
-                        p.translation,
-                        color = Color.Black,
-                        fontSize = with(density) { fontPx.coerceIn(8f, 64f).toSp() },
-                        lineHeight = with(density) { (fontPx * 1.1f).coerceIn(9f, 70f).toSp() },
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-            }
-        }
-    }
-}
-
 /** Снимок с камеры, повёрнутый правильно. */
 private fun ImageProxy.toUprightBitmap(): Bitmap {
     val raw = toBitmap()
@@ -456,7 +432,13 @@ private fun ZoomablePhoto(bmp: Bitmap, pieces: List<TextPiece>) {
                 .fillMaxSize()
                 .graphicsLayer(scaleX = zoom, scaleY = zoom, translationX = pan.x, translationY = pan.y)
         ) {
-            PhotoWithOverlay(bmp, pieces)
+            val rendered = remember(bmp, pieces) { renderOverlay(bmp, pieces) }
+            Image(
+                bitmap = rendered.asImageBitmap(),
+                contentDescription = null,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize()
+            )
         }
         if (zoom == 1f) {
             Text(
@@ -488,34 +470,58 @@ private fun shareText(context: Context, text: String) {
     context.startActivity(Intent.createChooser(send, "Отправить перевод"))
 }
 
-/** Отправить фото с нарисованным поверх переводом. */
-private fun sharePhoto(context: Context, bmp: Bitmap, pieces: List<TextPiece>) {
+/**
+ * Рисует перевод прямо на фото: плашка закрывает исходный текст, шрифт подбирается так,
+ * чтобы перевод поместился целиком (при нехватке места плашка растёт вниз).
+ */
+fun renderOverlay(bmp: Bitmap, pieces: List<TextPiece>): Bitmap {
     val out = bmp.copy(Bitmap.Config.ARGB_8888, true)
     val canvas = android.graphics.Canvas(out)
-    val bg = android.graphics.Paint().apply { color = android.graphics.Color.argb(235, 255, 255, 255) }
+    val bg = android.graphics.Paint().apply { color = android.graphics.Color.argb(242, 255, 255, 255) }
+    val border = android.graphics.Paint().apply {
+        color = android.graphics.Color.argb(160, 30, 136, 229)
+        style = android.graphics.Paint.Style.STROKE
+        strokeWidth = (bmp.width / 600f).coerceAtLeast(1.5f)
+    }
+    val paint = android.text.TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.BLACK
+        typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+    }
     for (p in pieces) {
-        val r = android.graphics.RectF(p.box)
-        canvas.drawRoundRect(r, 8f, 8f, bg)
-        var size = (p.box.height().toFloat() / p.lines) * 0.62f
-        val paint = android.text.TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-            color = android.graphics.Color.BLACK
-            isFakeBoldText = true
-        }
-        // Подбираем размер шрифта, чтобы перевод поместился в рамку
+        if (p.translation.isBlank()) continue
+        val pad = (p.box.height() / p.lines * 0.12f).coerceAtLeast(2f)
+        val w = (p.box.width() + 2 * pad).toInt().coerceAtLeast(24)
+        val lineH = p.box.height().toFloat() / p.lines
+        val minSize = (lineH * 0.42f).coerceAtLeast(9f)
+        var size = lineH * 0.78f
         var layout: android.text.StaticLayout
         while (true) {
-            paint.textSize = size.coerceAtLeast(10f)
+            paint.textSize = size
             layout = android.text.StaticLayout.Builder
-                .obtain(p.translation, 0, p.translation.length, paint, p.box.width().coerceAtLeast(20))
+                .obtain(p.translation, 0, p.translation.length, paint, (w - 2 * pad).toInt().coerceAtLeast(10))
+                .setLineSpacing(0f, 1.0f)
+                .setIncludePad(false)
                 .build()
-            if (layout.height <= p.box.height() || size <= 10f) break
-            size *= 0.9f
+            if (layout.height <= p.box.height() + 2 * pad || size <= minSize) break
+            size *= 0.92f
         }
+        val left = p.box.left - pad
+        val top = p.box.top - pad
+        val h = maxOf(p.box.height() + 2 * pad, layout.height + 2 * pad)
+        val r = android.graphics.RectF(left, top, left + w, top + h)
+        canvas.drawRoundRect(r, pad * 1.5f, pad * 1.5f, bg)
+        canvas.drawRoundRect(r, pad * 1.5f, pad * 1.5f, border)
         canvas.save()
-        canvas.translate(p.box.left.toFloat(), p.box.top.toFloat())
+        canvas.translate(left + pad, top + pad)
         layout.draw(canvas)
         canvas.restore()
     }
+    return out
+}
+
+/** Отправить фото с нарисованным поверх переводом. */
+private fun sharePhoto(context: Context, bmp: Bitmap, pieces: List<TextPiece>) {
+    val out = renderOverlay(bmp, pieces)
     val dir = java.io.File(context.cacheDir, "shared").apply { mkdirs() }
     val file = java.io.File(dir, "perevod.jpg")
     file.outputStream().use { out.compress(Bitmap.CompressFormat.JPEG, 90, it) }

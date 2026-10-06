@@ -345,6 +345,14 @@ class PhoneViewModel(app: Application) : AndroidViewModel(app), TextToSpeech.OnI
             "—"
         }
 
+    /** Быстрый перевод коротких подписей (ML Kit), при ошибке — точный. */
+    suspend fun translateFast(text: String, src: String, tgt: String): String =
+        try {
+            TextTranslator.translate(text, src, tgt)
+        } catch (e: Exception) {
+            translateForCamera(text, src, tgt)
+        }
+
     /** Единая точка перевода текста (сюда подключается движок перевода). */
     suspend fun translateText(text: String, src: String, tgt: String): String {
         val pair = setOf(src, tgt) == setOf(langA, langB)
