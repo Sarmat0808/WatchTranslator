@@ -13,8 +13,8 @@ android {
         applicationId = "com.sarmat.perevodchik"
         minSdk = 28
         targetSdk = 34
-        versionCode = 8
-        versionName = "4.4"
+        versionCode = 9
+        versionName = "5.0"
         ndk {
             abiFilters += listOf("arm64-v8a")
         }
@@ -68,5 +68,11 @@ dependencies {
     implementation("androidx.camera:camera-view:1.4.1")
     implementation("androidx.webkit:webkit:1.12.1")
     implementation("com.google.android.gms:play-services-wearable:18.2.0")
+    implementation("androidx.wear:wear-remote-interactions:1.1.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-guava:1.8.1")
+    // Установка на часы по «Отладке по Wi‑Fi» (как Bugjaeger / Wear Installer)
+    implementation("com.github.MuntashirAkon:libadb-android:3.1.1")
+    implementation("org.conscrypt:conscrypt-android:2.5.3")
+    implementation("org.bouncycastle:bcpkix-jdk15to18:1.81")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1")
 }

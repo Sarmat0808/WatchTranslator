@@ -103,6 +103,10 @@ object Engine {
 /** Принимает голос с часов по Bluetooth, распознаёт, переводит и отвечает. */
 class BridgeService : WearableListenerService() {
 
+    override fun onMessageReceived(event: com.google.android.gms.wearable.MessageEvent) {
+        if (event.path == com.sarmat.perevodchik.LinkProtocol.PONG) WatchLink.onPong(event.data)
+    }
+
     override fun onChannelOpened(channel: ChannelClient.Channel) {
         if (channel.path != Bridge.AUDIO_PATH) return
         Engine.init(applicationContext)
@@ -119,6 +123,8 @@ class BridgeService : WearableListenerService() {
                 id = header.getString("id")
                 val src = header.getString("src")
                 val tgt = header.getString("tgt")
+                // Связь выключена на телефоне — часы переводят сами
+                if (!WatchLink.linkEnabled(ctx)) throw IllegalStateException("link-disabled")
                 val samples = Bridge.pcm16ToFloats(bytes, nl + 1)
                 val text = Engine.recognize(samples, src)
                 val translation =

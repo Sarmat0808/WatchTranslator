@@ -429,6 +429,16 @@ fun MainScreen(
         }
         item {
             Chip(
+                onClick = { vm.toggleSyncLangs() },
+                label = { Text("Языки как на телефоне") },
+                secondaryLabel = { Text(if (vm.syncLangs) "Вкл" else "Выкл — часы сами по себе") },
+                icon = { Text("🔄", fontSize = 16.sp) },
+                colors = ChipDefaults.secondaryChipColors(),
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+        item {
+            Chip(
                 onClick = onHistory,
                 label = { Text("История") },
                 secondaryLabel = { Text("${vm.history.size} переводов") },

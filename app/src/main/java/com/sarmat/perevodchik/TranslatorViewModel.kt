@@ -85,6 +85,14 @@ class TranslatorViewModel(app: Application) : AndroidViewModel(app), TextToSpeec
         private set
     var phoneConnected by mutableStateOf(false)
         private set
+    /** Языки как на телефоне (можно выключить — тогда часы полностью самостоятельны). */
+    var syncLangs by mutableStateOf(prefs.getBoolean("syncLangs", true))
+        private set
+
+    fun toggleSyncLangs() {
+        syncLangs = !syncLangs
+        prefs.edit().putBoolean("syncLangs", syncLangs).apply()
+    }
 
     private val offlineVoice = OfflineVoice(app)
     private val offlineEars = OfflineEars(app)
@@ -105,6 +113,15 @@ class TranslatorViewModel(app: Application) : AndroidViewModel(app), TextToSpeec
         loadHistory()
         refreshModels()
         refreshPhone()
+        viewModelScope.launch {
+            LinkProtocol.langsFlow.collect { (a, b) ->
+                if (syncLangs) {
+                    source = a
+                    target = b
+                    saveLangs()
+                }
+            }
+        }
         // Модели НЕ грузим при запуске: у часов мало памяти, приложение должно открываться мгновенно.
         // Они загружаются, пока человек говорит (см. startListening).
     }

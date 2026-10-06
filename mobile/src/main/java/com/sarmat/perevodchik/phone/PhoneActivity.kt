@@ -98,6 +98,7 @@ class PhoneActivity : ComponentActivity() {
 fun PhoneRoot(vm: PhoneViewModel = viewModel()) {
     var showSettings by remember { mutableStateOf(false) }
     var showCamera by remember { mutableStateOf(false) }
+    var showWatch by remember { mutableStateOf(false) }
     KeepScreenOn(vm.anyDownloading || vm.recordingSide != null || vm.recognizing)
     when {
         showSettings -> {
@@ -105,7 +106,8 @@ fun PhoneRoot(vm: PhoneViewModel = viewModel()) {
             SettingsScreen(vm) { showSettings = false }
         }
         showCamera -> CameraScreen(vm) { showCamera = false }
-        else -> MainScreen(vm, openCamera = { showCamera = true }) { showSettings = true }
+        showWatch -> WatchScreen { showWatch = false }
+        else -> MainScreen(vm, openCamera = { showCamera = true }, openWatch = { showWatch = true }) { showSettings = true }
     }
 }
 
@@ -120,7 +122,7 @@ fun KeepScreenOn(on: Boolean) {
 }
 
 @Composable
-fun MainScreen(vm: PhoneViewModel, openCamera: () -> Unit, openSettings: () -> Unit) {
+fun MainScreen(vm: PhoneViewModel, openCamera: () -> Unit, openWatch: () -> Unit, openSettings: () -> Unit) {
     val context = LocalContext.current
     var pendingSide by remember { mutableStateOf<Side?>(null) }
     var picking by remember { mutableStateOf<Side?>(null) }
@@ -165,6 +167,7 @@ fun MainScreen(vm: PhoneViewModel, openCamera: () -> Unit, openSettings: () -> U
             TextButton(onClick = { vm.toggleFace() }) {
                 Text(if (vm.faceToFace) "👥 Лицом" else "💬 Чат", fontSize = 15.sp)
             }
+            TextButton(onClick = openWatch) { Text("⌚", fontSize = 22.sp) }
             TextButton(onClick = openCamera) { Text("📷", fontSize = 22.sp) }
             TextButton(onClick = openSettings) { Text("⚙", fontSize = 22.sp) }
         }

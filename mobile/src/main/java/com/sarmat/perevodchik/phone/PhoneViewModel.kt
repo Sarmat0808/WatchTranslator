@@ -117,6 +117,7 @@ class PhoneViewModel(app: Application) : AndroidViewModel(app), TextToSpeech.OnI
     fun refreshMt() {
         val a = langA
         val b = langB
+        viewModelScope.launch { runCatching { WatchLink.sendLangs(getApplication(), a, b) } }
         viewModelScope.launch {
             val (sup, rdy) = runCatching { MtEngine.status(getApplication(), a, b) }.getOrDefault(false to false)
             if (a == langA && b == langB) {

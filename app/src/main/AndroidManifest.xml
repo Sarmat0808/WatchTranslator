@@ -46,5 +46,17 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- Связь с телефоном: версия, синхронизация языков -->
+        <service
+            android:name=".WatchLinkService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />
+                <data
+                    android:host="*"
+                    android:pathPrefix="/perevodchik"
+                    android:scheme="wear" />
+            </intent-filter>
+        </service>
     </application>
 </manifest>
