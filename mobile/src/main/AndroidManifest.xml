@@ -23,6 +23,10 @@
         android:largeHeap="true"
         android:theme="@android:style/Theme.Material.NoActionBar">
 
+        <!-- Видеоядро для «Умного переводчика» (LiteRT-LM GPU) -->
+        <uses-native-library android:name="libvndksupport.so" android:required="false" />
+        <uses-native-library android:name="libOpenCL.so" android:required="false" />
+
         <activity
             android:name="com.sarmat.perevodchik.phone.PhoneActivity"
             android:exported="true"

@@ -20,8 +20,10 @@ enum class VoicePack(
     val dirName: String,
     val files: List<String>,
     val approxMb: Int,
-    /** Для пакетов распознавания: base / small / turbo */
-    val asrPrefix: String = ""
+    /** Для пакетов распознавания: base / small / turbo / pk */
+    val asrPrefix: String = "",
+    /** Откуда скачивать (по умолчанию — наш релиз "models" на GitHub) */
+    val baseUrl: String = BASE_URL
 ) {
     TTS(
         "Офлайн голос",
@@ -86,6 +88,17 @@ enum class VoicePack(
         ),
         670,
         "pk"
+    ),
+    /**
+     * Умный переводчик: нейросеть Google Gemma 4 E2B (Apache 2.0), работает на видеоядре
+     * телефона без интернета. Переводит напрямую между любыми языками, с учётом смысла.
+     */
+    LLM(
+        "Умный переводчик",
+        "llm",
+        listOf(LLM_FILE),
+        2470,
+        baseUrl = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/"
     );
 
     /** Parakeet (transducer) — другая модель, чем Whisper. */
@@ -104,6 +117,7 @@ enum class VoicePack(
     companion object {
         const val BASE_URL =
             "https://github.com/Sarmat0808/WatchTranslator/releases/download/models/"
+        const val LLM_FILE = "gemma-4-E2B-it.litertlm"
     }
 }
 
@@ -151,19 +165,29 @@ object VoicePackDownloader {
             var done = 0L
             for (name in pack.files) {
                 val target = File(dir, name)
+                if (target.exists()) { // уже скачан при прошлой попытке
+                    done += target.length()
+                    onProgress(done, maxOf(total, done))
+                    continue
+                }
                 val part = File(dir, "$name.part")
-                val url = URL(VoicePack.BASE_URL + name)
+                // Большие файлы: продолжаем с места обрыва, а не с нуля
+                val have = if (part.exists()) part.length() else 0L
+                val url = URL(pack.baseUrl + name)
                 val conn = (wifi?.openConnection(url) ?: url.openConnection()) as HttpURLConnection
                 conn.connectTimeout = 20_000
                 conn.readTimeout = 60_000
                 conn.instanceFollowRedirects = true
-                val finalConn = followRedirects(conn, wifi)
-                if (finalConn.responseCode != 200) {
-                    throw IllegalStateException("HTTP ${finalConn.responseCode} для $name")
+                val finalConn = followRedirects(conn, wifi, have)
+                val code = finalConn.responseCode
+                if (code != 200 && code != 206) {
+                    throw IllegalStateException("HTTP $code для $name")
                 }
+                val append = code == 206 && have > 0
+                if (append) done += have
                 finalConn.inputStream.use { input ->
-                    part.outputStream().use { out ->
-                        val buf = ByteArray(64 * 1024)
+                    java.io.FileOutputStream(part, append).use { out ->
+                        val buf = ByteArray(256 * 1024)
                         while (true) {
                             val n = input.read(buf)
                             if (n < 0) break
@@ -183,10 +207,11 @@ object VoicePackDownloader {
     }
 
     /** GitHub перенаправляет на другой домен — обрабатываем вручную, чтобы остаться на Wi‑Fi. */
-    private fun followRedirects(start: HttpURLConnection, wifi: Network?): HttpURLConnection {
+    private fun followRedirects(start: HttpURLConnection, wifi: Network?, from: Long = 0): HttpURLConnection {
         var conn = start
         repeat(5) {
             conn.instanceFollowRedirects = false
+            if (from > 0) conn.setRequestProperty("Range", "bytes=$from-")
             val code = conn.responseCode
             if (code in 300..399) {
                 val loc = conn.getHeaderField("Location") ?: return conn

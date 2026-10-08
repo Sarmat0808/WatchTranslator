@@ -127,6 +127,17 @@ class PhoneViewModel(app: Application) : AndroidViewModel(app), TextToSpeech.OnI
         }
     }
 
+    // ---------- Умный переводчик (Gemma) ----------
+
+    var useSmart by mutableStateOf(prefs.getBoolean("smart", true))
+        private set
+
+    fun toggleSmart() {
+        useSmart = !useSmart
+        prefs.edit().putBoolean("smart", useSmart).apply()
+        if (!useSmart) LlmTranslator.release()
+    }
+
     fun toggleHelsinki() {
         useHelsinki = !useHelsinki
         prefs.edit().putBoolean("helsinki", useHelsinki).apply()
@@ -263,7 +274,11 @@ class PhoneViewModel(app: Application) : AndroidViewModel(app), TextToSpeech.OnI
 
     fun deletePack(pack: VoicePack) {
         val app = getApplication<Application>()
-        if (pack.isAsr) Engine.releaseEars() else voice.release()
+        when {
+            pack == VoicePack.LLM -> LlmTranslator.release()
+            pack.isAsr -> Engine.releaseEars()
+            else -> voice.release()
+        }
         pack.delete(app)
         refreshPacks()
     }
@@ -340,7 +355,7 @@ class PhoneViewModel(app: Application) : AndroidViewModel(app), TextToSpeech.OnI
     /** Перевод для камеры (без озвучки и истории). */
     suspend fun translateForCamera(text: String, src: String, tgt: String): String =
         try {
-            translateText(text, src, tgt)
+            translateText(text, src, tgt, allowSmart = false)
         } catch (e: Exception) {
             if (!isLangReady(src) || !isLangReady(tgt)) downloadLang(if (!isLangReady(src)) src else tgt)
             "—"
@@ -355,7 +370,15 @@ class PhoneViewModel(app: Application) : AndroidViewModel(app), TextToSpeech.OnI
         }
 
     /** Единая точка перевода текста (сюда подключается движок перевода). */
-    suspend fun translateText(text: String, src: String, tgt: String): String {
+    suspend fun translateText(text: String, src: String, tgt: String, allowSmart: Boolean = true): String {
+        if (allowSmart && useSmart && LlmTranslator.isInstalled(getApplication())) {
+            try {
+                val r = LlmTranslator.translate(getApplication(), text, src, tgt)
+                if (r.isNotBlank()) return r
+            } catch (_: Throwable) {
+                // не получилось — переводим запасным движком
+            }
+        }
         val pair = setOf(src, tgt) == setOf(langA, langB)
         if (useHelsinki && mtReady && pair) {
             try {

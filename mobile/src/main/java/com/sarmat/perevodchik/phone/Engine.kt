@@ -84,11 +84,25 @@ object Engine {
         scope.launch {
             runCatching { ears(lang)?.load(lang) }
             runCatching { if (VoicePack.TTS.isInstalled(app)) voice.load() }
+            if (useSmart()) runCatching { LlmTranslator.warmUp(app) }
         }
     }
 
-    /** Лучший доступный перевод: Helsinki (если скачан для этой пары), иначе ML Kit. */
-    suspend fun translateBest(text: String, src: String, tgt: String): String {
+    fun useSmart() = app.getSharedPreferences("phone", Context.MODE_PRIVATE).getBoolean("smart", true)
+
+    /**
+     * Лучший доступный перевод: «Умный переводчик» (Gemma), затем Helsinki
+     * (если скачан для этой пары), иначе ML Kit.
+     */
+    suspend fun translateBest(text: String, src: String, tgt: String, allowSmart: Boolean = true): String {
+        if (allowSmart && useSmart() && LlmTranslator.isInstalled(app)) {
+            try {
+                val r = LlmTranslator.translate(app, text, src, tgt)
+                if (r.isNotBlank()) return r
+            } catch (_: Throwable) {
+                // не получилось — переводим запасным движком
+            }
+        }
         val useHelsinki = app.getSharedPreferences("phone", Context.MODE_PRIVATE).getBoolean("helsinki", true)
         if (useHelsinki) {
             try {

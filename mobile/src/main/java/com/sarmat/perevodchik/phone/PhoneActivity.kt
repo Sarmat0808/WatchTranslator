@@ -197,9 +197,10 @@ fun MainScreen(vm: PhoneViewModel, openCamera: () -> Unit, openWatch: () -> Unit
                     fontSize = 14.sp
                 )
             }
-        } else if ( // старые пакеты Whisper медленные — подсказываем быстрый микрофон
-            vm.packInstalled[VoicePack.ASR_FAST] != true &&
-            (vm.langA in OfflineEars.parakeetLanguages || vm.langB in OfflineEars.parakeetLanguages)
+        } else if ( // подсказываем новые пакеты: быстрый микрофон и умный перевод
+            (vm.packInstalled[VoicePack.ASR_FAST] != true &&
+                (vm.langA in OfflineEars.parakeetLanguages || vm.langB in OfflineEars.parakeetLanguages)) ||
+            (vm.useSmart && vm.packInstalled[VoicePack.LLM] != true)
         ) {
             Card(
                 colors = CardDefaults.cardColors(containerColor = Color(0xFF263238)),
@@ -209,7 +210,7 @@ fun MainScreen(vm: PhoneViewModel, openCamera: () -> Unit, openWatch: () -> Unit
                     .clickable { openSettings() }
             ) {
                 Text(
-                    "⚡ Скачайте «Быстрый микрофон» — распознавание станет в разы быстрее и точнее → нажмите здесь",
+                    "⚡ Скачайте «Быстрый микрофон» и «Умный переводчик» — распознавание и перевод станут намного точнее → нажмите здесь",
                     modifier = Modifier.padding(12.dp),
                     fontSize = 14.sp
                 )
@@ -525,7 +526,11 @@ fun SettingsScreen(vm: PhoneViewModel, onBack: () -> Unit) {
             )
         }
 
-        item { Section("Точный перевод (Helsinki)") }
+        item { Section("Умный перевод (нейросеть на телефоне)") }
+        item { PackRow(vm, VoicePack.LLM, "Gemma 4: переводит по смыслу, напрямую финский ⇄ русский и др., без интернета (рекомендую)") }
+        item { ToggleRow("Использовать умный перевод", vm.useSmart) { vm.toggleSmart() } }
+
+        item { Section("Точный перевод (Helsinki) — запасной") }
         item { MtRow(vm) }
         item { ToggleRow("Использовать точный перевод", vm.useHelsinki) { vm.toggleHelsinki() } }
 

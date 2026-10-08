@@ -13,8 +13,8 @@ android {
         applicationId = "com.sarmat.perevodchik"
         minSdk = 28
         targetSdk = 34
-        versionCode = 9
-        versionName = "5.0"
+        versionCode = 10
+        versionName = "6.0"
         ndk {
             abiFilters += listOf("arm64-v8a")
         }
@@ -41,6 +41,14 @@ android {
     }
     kotlinOptions {
         jvmTarget = "17"
+        // библиотека LiteRT-LM собрана более новым Kotlin
+        freeCompilerArgs += "-Xskip-metadata-version-check"
+    }
+    packaging {
+        jniLibs {
+            pickFirsts += "**/libc++_shared.so"
+            useLegacyPackaging = true
+        }
     }
     buildFeatures {
         compose = true
@@ -59,6 +67,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.7")
     implementation("com.google.mlkit:translate:17.0.3")
+    // Умный переводчик: нейросеть Gemma на телефоне (Google LiteRT-LM)
+    implementation("com.google.ai.edge.litertlm:litertlm-android:latest.release")
     // Камера и офлайн-распознавание текста (модель встроена в приложение)
     implementation("com.google.mlkit:text-recognition:16.0.1")
     implementation("com.google.mlkit:language-id:17.0.6")
