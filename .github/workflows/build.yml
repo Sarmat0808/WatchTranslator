@@ -11,6 +11,7 @@ on:
       - .github/workflows/probe.yml
       - .github/workflows/voices.yml
       - .github/workflows/mttest.yml
+      - .github/workflows/eval.yml
   workflow_dispatch:
 
 env:

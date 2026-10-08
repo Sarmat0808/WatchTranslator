@@ -1,0 +1,54 @@
+name: Quality test FI-RU
+
+# Сравнивает модели распознавания речи и перевода для финского и русского.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - tools/eval_asr.py
+      - tools/eval_mt.py
+      - .github/workflows/eval.yml
+
+env:
+  CI: "true"
+  PIP_NO_INPUT: "1"
+  HF_HUB_DISABLE_PROGRESS_BARS: "1"
+
+jobs:
+  mt:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Translation test
+        run: |
+          pip install -q torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -q "transformers<4.50" sentencepiece sacremoses protobuf
+          python tools/eval_mt.py 2>&1 | grep -v -i warn
+  asr:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Download models
+        run: |
+          set -e
+          pip install -q sherpa-onnx==1.13.8 numpy scipy
+          mkdir -p tts m
+          for f in duration_predictor.int8.onnx text_encoder.int8.onnx vector_estimator.int8.onnx vocoder.int8.onnx tts.json unicode_indexer.bin voice.bin; do
+            curl -sSL -o tts/tts-$f https://github.com/Sarmat0808/WatchTranslator/releases/download/models/tts-$f
+          done
+          base=https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models
+          cd m
+          for n in sherpa-onnx-whisper-base sherpa-onnx-whisper-small sherpa-onnx-whisper-turbo sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8; do
+            curl -sSL -o x.tar.bz2 $base/$n.tar.bz2 && tar xjf x.tar.bz2 && rm x.tar.bz2
+          done
+          ls -l */
+      - name: Speech test
+        run: python tools/eval_asr.py tts m
