@@ -131,10 +131,13 @@ jobs:
       - name: Smart translator exactly as in the app (LiteRT-LM + Gemma 4 E2B)
         run: |
           set -o pipefail
-          curl -sSL -o /tmp/model.litertlm https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm
-          ls -l /tmp/model.litertlm
+          H=https://huggingface.co/litert-community
+          curl -sSfL -o /tmp/E2B.litertlm $H/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm
+          M="/tmp/E2B.litertlm"
+          curl -sSfL -o /tmp/E4B.litertlm $H/gemma-4-E4B-it-litert-lm/resolve/main/gemma-4-E4B-it.litertlm && M="$M /tmp/E4B.litertlm" || echo "no E4B file"
+          ls -l /tmp/*.litertlm
           chmod +x gradlew
-          ./gradlew -p tools/llmtest run --args=/tmp/model.litertlm --no-daemon --console=plain -q 2>&1 | tee eval-app-llm.txt
+          ./gradlew -p tools/llmtest run --args="$M" --no-daemon --console=plain -q 2>&1 | grep -v -E "^(INFO|WARNING|W0000|I0000)" | tee eval-app-llm.txt
       - uses: softprops/action-gh-release@v2
         if: always()
         with:

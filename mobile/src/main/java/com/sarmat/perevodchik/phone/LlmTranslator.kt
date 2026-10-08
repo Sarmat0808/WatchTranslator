@@ -2,12 +2,9 @@ package com.sarmat.perevodchik.phone
 
 import android.content.Context
 import com.google.ai.edge.litertlm.Backend
-import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
 import com.google.ai.edge.litertlm.Message
-import com.google.ai.edge.litertlm.SamplerConfig
-import com.google.ai.edge.litertlm.ThinkingConfig
 import com.sarmat.perevodchik.VoicePack
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -67,13 +64,8 @@ object LlmTranslator {
         withContext(Dispatchers.Default) {
             synchronized(lock) {
                 val e = load(ctx)
-                val config = ConversationConfig(
-                    samplerConfig = SamplerConfig(topK = 1, topP = 1.0, temperature = 0.0),
-                    thinkingConfig = ThinkingConfig(enableThinking = false),
-                    maxOutputToken = 400
-                )
-                e.createConversation(config).use { c ->
-                    LlmPrompt.clean(c.sendMessage(Message.user(LlmPrompt.build(text, src, tgt))).toString())
+                e.createConversation(LlmPrompt.config(src, tgt)).use { c ->
+                    LlmPrompt.clean(c.sendMessage(Message.user(text)).toString())
                 }
             }
         }
