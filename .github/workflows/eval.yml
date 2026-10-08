@@ -7,6 +7,8 @@ on:
     paths:
       - tools/eval_asr.py
       - tools/eval_mt.py
+      - tools/eval_llm.py
+      - tools/eval_phrases.py
       - .github/workflows/eval.yml
 
 env:
@@ -68,3 +70,43 @@ jobs:
           tag_name: ci-log
           make_latest: false
           files: eval-asr.txt
+  llm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: llama.cpp
+        run: |
+          gh release download -R ggml-org/llama.cpp -p '*bin-ubuntu-x64.zip' -D llama
+          cd llama && unzip -q *.zip && find . -name llama-server -type f
+      - name: Test models
+        run: |
+          set -o pipefail
+          SRV=$(find llama -name llama-server -type f | head -1)
+          chmod +x $SRV
+          export LD_LIBRARY_PATH=$(dirname $SRV):$LD_LIBRARY_PATH
+          : > eval-llm.txt
+          for spec in \
+            "Gemma4-E2B|https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q4_K_M.gguf" \
+            "Gemma4-E4B|https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/resolve/main/gemma-4-E4B-it-Q4_K_M.gguf" \
+            "TranslateGemma-4B|https://huggingface.co/42ailab/TranslateGemma-4B-GGUF/resolve/main/translategemma-4b-it-Q4_K_M.gguf"; do
+            name=${spec%%|*}; url=${spec#*|}
+            echo "===== $name" | tee -a eval-llm.txt
+            curl -sSL -o model.gguf "$url" || { echo "download failed" | tee -a eval-llm.txt; continue; }
+            ls -l model.gguf | tee -a eval-llm.txt
+            $SRV -m model.gguf --port 8080 -c 2048 -t 4 > server.log 2>&1 &
+            PID=$!
+            for i in $(seq 1 120); do curl -sf http://127.0.0.1:8080/health > /dev/null && break; sleep 2; done
+            python tools/eval_llm.py "$name" 2>&1 | tee -a eval-llm.txt || tail -20 server.log | tee -a eval-llm.txt
+            kill $PID; wait $PID 2>/dev/null; rm -f model.gguf
+          done
+      - uses: softprops/action-gh-release@v2
+        if: always()
+        with:
+          tag_name: ci-log
+          make_latest: false
+          files: eval-llm.txt

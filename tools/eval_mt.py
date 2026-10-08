@@ -1,30 +1,15 @@
 """Сравнение перевода FI↔RU: через английский (как сейчас) против прямых моделей."""
 import time
 
+import sys
+
 import torch
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, MarianMTModel, MarianTokenizer
 
 torch.set_num_threads(4)
 
-FI = [
-    "Hyvää päivää, soitan Kelasta. Hakemuksenne on käsittelyssä, mutta tarvitsemme vielä palkkatodistuksen.",
-    "Voisitteko tulla vastaanotolle huomenna kello kymmenen?",
-    "Työmarkkinatorilla on teille uusi työpaikkailmoitus rakennusalalta.",
-    "Lähettäkää liitteet sähköisesti oma asiointi -palvelun kautta.",
-    "Teidän työttömyysetuutenne maksetaan ensi viikolla.",
-    "Mä soitan sulle huomenna uudestaan.",
-    "Onko teillä kysyttävää?",
-    "Lapsenne opettaja haluaa sopia vanhempainvartin.",
-]
-RU = [
-    "Здравствуйте, я хотел бы узнать, когда будет рассмотрено моё заявление.",
-    "Извините, я плохо говорю по-фински, можно говорить медленнее?",
-    "Я работал на стройке два месяца, но работа закончилась.",
-    "Мне нужно записаться к врачу на следующей неделе.",
-    "Куда отправить справку о зарплате?",
-    "Спасибо, до свидания.",
-    "Я не понял, повторите, пожалуйста.",
-]
+sys.path.insert(0, "tools")
+from eval_phrases import FI, RU  # noqa: E402
 
 cache = {}
 
