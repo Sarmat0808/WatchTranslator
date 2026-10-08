@@ -18,6 +18,8 @@ jobs:
   mt:
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -27,10 +29,18 @@ jobs:
         run: |
           pip install -q torch --index-url https://download.pytorch.org/whl/cpu
           pip install -q "transformers<4.50" sentencepiece sacremoses protobuf
-          python tools/eval_mt.py 2>&1 | grep -v -i warn
+          python tools/eval_mt.py 2>&1 | grep -v -i warn | tee eval-mt.txt
+      - uses: softprops/action-gh-release@v2
+        if: always()
+        with:
+          tag_name: ci-log
+          make_latest: false
+          files: eval-mt.txt
   asr:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -51,4 +61,10 @@ jobs:
           done
           ls -l */
       - name: Speech test
-        run: python tools/eval_asr.py tts m
+        run: python tools/eval_asr.py tts m 2>&1 | tee eval-asr.txt
+      - uses: softprops/action-gh-release@v2
+        if: always()
+        with:
+          tag_name: ci-log
+          make_latest: false
+          files: eval-asr.txt
