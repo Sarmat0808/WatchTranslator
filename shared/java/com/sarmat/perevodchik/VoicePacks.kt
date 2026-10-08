@@ -16,7 +16,7 @@ import kotlin.coroutines.resume
 
 private const val MODELS_URL =
     "https://github.com/Sarmat0808/WatchTranslator/releases/download/models/"
-private const val GEMMA_FILE = "gemma-4-E2B-it.litertlm"
+private const val GEMMA_FILE = "gemma-4-E4B-it.litertlm"
 
 /** Офлайн-пакет: набор файлов, которые скачиваются из релиза "models" на GitHub. */
 enum class VoicePack(
@@ -94,15 +94,16 @@ enum class VoicePack(
         "pk"
     ),
     /**
-     * Умный переводчик: нейросеть Google Gemma 4 E2B (Apache 2.0), работает на видеоядре
-     * телефона без интернета. Переводит напрямую между любыми языками, с учётом смысла.
+     * Умный переводчик: нейросеть Google Gemma 4 E4B (Apache 2.0), работает на телефоне
+     * без интернета. Переводит напрямую между языками, с учётом смысла. В тестах E4B
+     * переводила FI↔RU без ошибок, E2B — быстрее, но путала грамматику.
      */
     LLM(
         "Умный переводчик",
         "llm",
         listOf(GEMMA_FILE),
-        2470,
-        baseUrl = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/"
+        3700,
+        baseUrl = "https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/main/"
     );
 
     /** Parakeet (transducer) — другая модель, чем Whisper. */
@@ -164,7 +165,7 @@ object VoicePackDownloader {
             val dir = pack.dir(context)
             File(dir, "ready").delete()
             dir.mkdirs()
-            val total = pack.approxMb * 1_048_576L
+            var total = pack.approxMb * 1_048_576L
             var done = 0L
             for (name in pack.files) {
                 val target = File(dir, name)
@@ -188,6 +189,9 @@ object VoicePackDownloader {
                 }
                 val append = code == 206 && have > 0
                 if (append) done += have
+                // Точный размер, если сервер его сообщил (для пакета из одного файла)
+                val len = finalConn.contentLengthLong
+                if (pack.files.size == 1 && len > 0) total = len + (if (append) have else 0L)
                 finalConn.inputStream.use { input ->
                     java.io.FileOutputStream(part, append).use { out ->
                         val buf = ByteArray(256 * 1024)

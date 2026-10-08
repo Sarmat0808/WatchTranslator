@@ -527,7 +527,7 @@ fun SettingsScreen(vm: PhoneViewModel, onBack: () -> Unit) {
         }
 
         item { Section("Умный перевод (нейросеть на телефоне)") }
-        item { PackRow(vm, VoicePack.LLM, "Gemma 4: переводит по смыслу, напрямую финский ⇄ русский и др., без интернета (рекомендую)") }
+        item { PackRow(vm, VoicePack.LLM, "Gemma 4: переводит по смыслу, напрямую финский ⇄ русский и др., без интернета (рекомендую, скачивать по Wi‑Fi)") }
         item { ToggleRow("Использовать умный перевод", vm.useSmart) { vm.toggleSmart() } }
 
         item { Section("Точный перевод (Helsinki) — запасной") }

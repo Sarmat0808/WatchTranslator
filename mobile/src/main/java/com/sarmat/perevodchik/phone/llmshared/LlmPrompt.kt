@@ -22,8 +22,9 @@ object LlmPrompt {
             "phone call or a face-to-face conversation, transcribed from speech (it may lack " +
             "punctuation or contain small recognition errors). Translate it into $t: exact " +
             "meaning, natural spoken style, correct grammar, polite form if the original is " +
-            "polite. Keep names of organizations and services unchanged in Latin letters " +
-            "(Kela, TE-palvelut, Työmarkkinatori, OmaKanta, Wilma). Output only the $t translation."
+            "polite. Keep proper names of Finnish organizations unchanged in Latin letters " +
+            "(for example Kela). Do not add anything that is not in the original. " +
+            "Output only the $t translation."
     }
 
     /** Несколько образцов — маленькая модель с ними переводит заметно точнее. */
