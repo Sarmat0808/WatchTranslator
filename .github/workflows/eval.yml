@@ -81,12 +81,15 @@ jobs:
       - uses: actions/checkout@v5
       - name: llama.cpp
         run: |
-          gh release download -R ggml-org/llama.cpp -p '*bin-ubuntu-x64.zip' -D llama
-          cd llama && unzip -q *.zip && find . -name llama-server -type f
+          git clone -q --depth 1 https://github.com/ggml-org/llama.cpp
+          cd llama.cpp
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DLLAMA_CURL=OFF -DLLAMA_BUILD_TESTS=OFF > /dev/null
+          cmake --build build --target llama-server -j 4 > /dev/null
+          ls -l build/bin
       - name: Test models
         run: |
           set -o pipefail
-          SRV=$(find llama -name llama-server -type f | head -1)
+          SRV=$(find llama.cpp/build -name llama-server -type f | head -1)
           chmod +x $SRV
           export LD_LIBRARY_PATH=$(dirname $SRV):$LD_LIBRARY_PATH
           : > eval-llm.txt
