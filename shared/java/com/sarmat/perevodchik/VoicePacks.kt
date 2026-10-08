@@ -14,6 +14,10 @@ import java.net.HttpURLConnection
 import java.net.URL
 import kotlin.coroutines.resume
 
+private const val MODELS_URL =
+    "https://github.com/Sarmat0808/WatchTranslator/releases/download/models/"
+private const val GEMMA_FILE = "gemma-4-E2B-it.litertlm"
+
 /** Офлайн-пакет: набор файлов, которые скачиваются из релиза "models" на GitHub. */
 enum class VoicePack(
     val title: String,
@@ -23,7 +27,7 @@ enum class VoicePack(
     /** Для пакетов распознавания: base / small / turbo / pk */
     val asrPrefix: String = "",
     /** Откуда скачивать (по умолчанию — наш релиз "models" на GitHub) */
-    val baseUrl: String = BASE_URL
+    val baseUrl: String = MODELS_URL
 ) {
     TTS(
         "Офлайн голос",
@@ -96,7 +100,7 @@ enum class VoicePack(
     LLM(
         "Умный переводчик",
         "llm",
-        listOf(LLM_FILE),
+        listOf(GEMMA_FILE),
         2470,
         baseUrl = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/"
     );
@@ -115,9 +119,8 @@ enum class VoicePack(
     }
 
     companion object {
-        const val BASE_URL =
-            "https://github.com/Sarmat0808/WatchTranslator/releases/download/models/"
-        const val LLM_FILE = "gemma-4-E2B-it.litertlm"
+        const val BASE_URL = MODELS_URL
+        const val LLM_FILE = GEMMA_FILE
     }
 }
 
