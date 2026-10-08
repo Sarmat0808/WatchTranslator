@@ -42,18 +42,23 @@ object Engine {
     private val _watchEvents = MutableSharedFlow<WatchExchange>(extraBufferCapacity = 8)
     val watchEvents: SharedFlow<WatchExchange> = _watchEvents
 
-    /** Порядок выбора распознавания: самое точное из скачанных. */
-    val asrPacks = listOf(VoicePack.ASR_TURBO, VoicePack.ASR_SMALL, VoicePack.ASR)
+    /** Порядок выбора распознавания: быстрый Parakeet, затем самый точный из скачанных Whisper. */
+    val asrPacks = listOf(VoicePack.ASR_FAST, VoicePack.ASR_TURBO, VoicePack.ASR_SMALL, VoicePack.ASR)
+    private val whisperPacks = listOf(VoicePack.ASR_TURBO, VoicePack.ASR_SMALL, VoicePack.ASR)
 
     fun init(context: Context) {
         if (!::app.isInitialized) app = context.applicationContext
     }
 
-    fun bestAsr(): VoicePack? = asrPacks.firstOrNull { it.isInstalled(app) }
+    /** Лучший скачанный пакет для этого языка. */
+    fun bestAsr(lang: String): VoicePack? {
+        if (VoicePack.ASR_FAST.isInstalled(app) && lang in OfflineEars.parakeetLanguages) return VoicePack.ASR_FAST
+        return whisperPacks.firstOrNull { it.isInstalled(app) }
+    }
 
     @Synchronized
-    fun ears(): OfflineEars? {
-        val p = bestAsr() ?: return null
+    fun ears(lang: String): OfflineEars? {
+        val p = bestAsr(lang) ?: return null
         val cur = ears
         if (cur != null && cur.pack == p) return cur
         cur?.release()
@@ -70,14 +75,14 @@ object Engine {
 
     suspend fun recognize(samples: FloatArray, lang: String): String =
         withContext(Dispatchers.Default) {
-            val e = ears() ?: throw IllegalStateException("На телефоне не скачан офлайн-микрофон")
+            val e = ears(lang) ?: throw IllegalStateException("На телефоне не скачан офлайн-микрофон")
             e.recognize(samples, lang)
         }
 
     /** Заранее загрузить модели, чтобы первая фраза была быстрой. */
     fun warmUp(lang: String) {
         scope.launch {
-            runCatching { ears()?.load(lang) }
+            runCatching { ears(lang)?.load(lang) }
             runCatching { if (VoicePack.TTS.isInstalled(app)) voice.load() }
         }
     }

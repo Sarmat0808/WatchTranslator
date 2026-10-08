@@ -1,7 +1,7 @@
 name: Voice packs
 
 # Скачивает офлайн-модели голоса (Supertonic-3, 31 язык) и распознавания речи
-# (Whisper base, ~99 языков), проверяет их и выкладывает в релиз "models",
+# (Whisper base/small/turbo, ~99 языков; Parakeet v3 — быстрый, 25 европейских), проверяет их и выкладывает в релиз "models",
 # откуда приложение на часах скачивает их по Wi‑Fi.
 
 on:
@@ -39,6 +39,9 @@ jobs:
           ls -l sherpa-onnx-whisper-small
           curl -sSL -o wt.tar.bz2 $base/asr-models/sherpa-onnx-whisper-turbo.tar.bz2
           tar xjf wt.tar.bz2
+          curl -sSL -o pk.tar.bz2 $base/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2
+          tar xjf pk.tar.bz2
+          ls -l sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8
           rm -f *.tar.bz2
           mkdir -p out
           T=sherpa-onnx-supertonic-3-tts-int8-2026-05-11
@@ -57,6 +60,11 @@ jobs:
           cp $U/turbo-encoder.int8.onnx out/asr-turbo-encoder.int8.onnx
           cp $U/turbo-decoder.int8.onnx out/asr-turbo-decoder.int8.onnx
           cp $U/turbo-tokens.txt out/asr-turbo-tokens.txt
+          K=sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8
+          cp $K/encoder*.int8.onnx out/asr-pk-encoder.int8.onnx
+          cp $K/decoder*.int8.onnx out/asr-pk-decoder.int8.onnx
+          cp $K/joiner*.int8.onnx out/asr-pk-joiner.int8.onnx
+          cp $K/tokens.txt out/asr-pk-tokens.txt
           ls -l out
       - name: Round-trip test (TTS -> ASR)
         run: |

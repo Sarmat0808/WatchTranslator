@@ -69,7 +69,27 @@ enum class VoicePack(
         ),
         989,
         "turbo"
+    ),
+    /**
+     * NVIDIA Parakeet v3: 25 европейских языков (финский, русский, болгарский…).
+     * Работает в разы быстрее Whisper: обрабатывает только реальную длину фразы,
+     * а не всегда окно в 30 секунд. Только для телефона (для часов слишком большой).
+     */
+    ASR_FAST(
+        "Быстрый микрофон",
+        "asr-fast",
+        listOf(
+            "asr-pk-encoder.int8.onnx",
+            "asr-pk-decoder.int8.onnx",
+            "asr-pk-joiner.int8.onnx",
+            "asr-pk-tokens.txt"
+        ),
+        670,
+        "pk"
     );
+
+    /** Parakeet (transducer) — другая модель, чем Whisper. */
+    val isParakeet get() = asrPrefix == "pk"
 
     val isAsr get() = asrPrefix.isNotEmpty()
 

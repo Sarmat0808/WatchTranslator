@@ -11,6 +11,7 @@ import com.k2fsa.sherpa.onnx.GenerationConfig
 import com.k2fsa.sherpa.onnx.OfflineModelConfig
 import com.k2fsa.sherpa.onnx.OfflineRecognizer
 import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
+import com.k2fsa.sherpa.onnx.OfflineTransducerModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTts
 import com.k2fsa.sherpa.onnx.OfflineTtsConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
@@ -135,7 +136,7 @@ class OfflineVoice(private val context: Context, private val threads: Int = 2) {
     }
 }
 
-/** Офлайн-распознавание речи (Whisper base), ~99 языков. */
+/** Офлайн-распознавание речи: Whisper (~99 языков) или Parakeet v3 (25 европейских, быстрый). */
 class OfflineEars(
     private val context: Context,
     val pack: VoicePack = VoicePack.ASR,
@@ -151,16 +152,38 @@ class OfflineEars(
             "tl"
         )
         const val RATE = 16000
+
+        /** Языки Parakeet v3 (язык он определяет сам). */
+        val parakeetLanguages = setOf(
+            "bg", "hr", "cs", "da", "nl", "en", "et", "fi", "fr", "de", "el", "hu", "it", "lv",
+            "lt", "mt", "pl", "pt", "ro", "sk", "sl", "es", "sv", "ru", "uk"
+        )
     }
 
     private var recognizer: OfflineRecognizer? = null
     private var currentLang = ""
 
-    fun supports(code: String) = code in languages
+    fun supports(code: String) =
+        if (pack.isParakeet) code in parakeetLanguages else code in languages
 
     private fun config(lang: String): OfflineRecognizerConfig {
         val p = pack
         val x = pack.asrPrefix
+        if (p.isParakeet) {
+            return OfflineRecognizerConfig(
+                modelConfig = OfflineModelConfig(
+                    transducer = OfflineTransducerModelConfig(
+                        encoder = p.file(context, "asr-pk-encoder.int8.onnx").absolutePath,
+                        decoder = p.file(context, "asr-pk-decoder.int8.onnx").absolutePath,
+                        joiner = p.file(context, "asr-pk-joiner.int8.onnx").absolutePath
+                    ),
+                    tokens = p.file(context, "asr-pk-tokens.txt").absolutePath,
+                    modelType = "nemo_transducer",
+                    numThreads = threads
+                ),
+                decodingMethod = "greedy_search"
+            )
+        }
         return OfflineRecognizerConfig(
             modelConfig = OfflineModelConfig(
                 whisper = OfflineWhisperModelConfig(
@@ -187,7 +210,8 @@ class OfflineEars(
             currentLang = lang
             return created
         }
-        if (currentLang != lang) {
+        // Parakeet сам определяет язык — перезагружать модель не нужно
+        if (currentLang != lang && !pack.isParakeet) {
             r.setConfig(config(lang))
             currentLang = lang
         }
@@ -297,7 +321,7 @@ class VoiceRecorder {
                 } else if (heardSpeech) {
                     silentChunks++
                 }
-                if (heardSpeech && silentChunks >= 15) break       // 1,5 с тишины после речи
+                if (heardSpeech && silentChunks >= 9) break        // 0,9 с тишины после речи
                 if (!heardSpeech && chunks >= 80) break             // 8 с без речи
                 if (chunks >= 250) break                             // максимум 25 с
             }

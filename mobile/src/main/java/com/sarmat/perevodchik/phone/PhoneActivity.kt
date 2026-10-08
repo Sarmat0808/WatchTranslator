@@ -69,6 +69,7 @@ import com.sarmat.perevodchik.Languages
 import com.sarmat.perevodchik.UiText
 import com.sarmat.perevodchik.OfflineVoice
 import com.sarmat.perevodchik.VoicePack
+import com.sarmat.perevodchik.OfflineEars
 
 val ColorA = Color(0xFF1E88E5)
 val ColorB = Color(0xFFFFB300)
@@ -192,6 +193,23 @@ fun MainScreen(vm: PhoneViewModel, openCamera: () -> Unit, openWatch: () -> Unit
             ) {
                 Text(
                     "📥 Для работы без интернета скачайте голос, микрофон и языки → нажмите здесь",
+                    modifier = Modifier.padding(12.dp),
+                    fontSize = 14.sp
+                )
+            }
+        } else if ( // старые пакеты Whisper медленные — подсказываем быстрый микрофон
+            vm.packInstalled[VoicePack.ASR_FAST] != true &&
+            (vm.langA in OfflineEars.parakeetLanguages || vm.langB in OfflineEars.parakeetLanguages)
+        ) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF263238)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 6.dp)
+                    .clickable { openSettings() }
+            ) {
+                Text(
+                    "⚡ Скачайте «Быстрый микрофон» — распознавание станет в разы быстрее и точнее → нажмите здесь",
                     modifier = Modifier.padding(12.dp),
                     fontSize = 14.sp
                 )
@@ -496,12 +514,13 @@ fun SettingsScreen(vm: PhoneViewModel, onBack: () -> Unit) {
         }
         item { Section("Офлайн-пакеты (скачать один раз по Wi‑Fi)") }
         item { PackRow(vm, VoicePack.TTS, "Голос: озвучка на 31 языке") }
-        item { PackRow(vm, VoicePack.ASR_SMALL, "Микрофон: точное распознавание (рекомендую)") }
-        item { PackRow(vm, VoicePack.ASR_TURBO, "Микрофон: максимальная точность, медленнее") }
+        item { PackRow(vm, VoicePack.ASR_FAST, "Микрофон: быстрый и точный для финского, русского, болгарского и др. (рекомендую)") }
+        item { PackRow(vm, VoicePack.ASR_SMALL, "Микрофон: для остальных языков (японский, турецкий…)") }
+        item { PackRow(vm, VoicePack.ASR_TURBO, "Микрофон: для остальных языков, точнее, но медленно") }
         item {
             Text(
-                "Если скачаны оба микрофона, используется самый точный. " +
-                    "Часы с «Переводчиком» тоже будут пользоваться ими через Bluetooth.",
+                "Для финского и русского используется «Быстрый микрофон» — ответ за 1–2 секунды. " +
+                    "Часы с «Переводчиком» тоже пользуются им через Bluetooth.",
                 fontSize = 13.sp, color = Color.Gray
             )
         }
