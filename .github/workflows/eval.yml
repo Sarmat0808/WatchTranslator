@@ -95,13 +95,12 @@ jobs:
           : > eval-llm.txt
           for spec in \
             "Gemma4-E2B|https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q4_K_M.gguf" \
-            "Gemma4-E4B|https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/resolve/main/gemma-4-E4B-it-Q4_K_M.gguf" \
-            "TranslateGemma-4B|https://huggingface.co/42ailab/TranslateGemma-4B-GGUF/resolve/main/translategemma-4b-it-Q4_K_M.gguf"; do
+            "Gemma4-E4B|https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/resolve/main/gemma-4-E4B-it-Q4_K_M.gguf"; do
             name=${spec%%|*}; url=${spec#*|}
             echo "===== $name" | tee -a eval-llm.txt
             curl -sSL -o model.gguf "$url" || { echo "download failed" | tee -a eval-llm.txt; continue; }
             ls -l model.gguf | tee -a eval-llm.txt
-            $SRV -m model.gguf --port 8080 -c 2048 -t 4 > server.log 2>&1 &
+            $SRV -m model.gguf --port 8080 -c 2048 -t 4 --jinja --reasoning-budget 0 > server.log 2>&1 &
             PID=$!
             for i in $(seq 1 120); do curl -sf http://127.0.0.1:8080/health > /dev/null && break; sleep 2; done
             python tools/eval_llm.py "$name" 2>&1 | tee -a eval-llm.txt || tail -20 server.log | tee -a eval-llm.txt

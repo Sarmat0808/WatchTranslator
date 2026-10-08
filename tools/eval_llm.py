@@ -23,12 +23,15 @@ def prompt(text, src, tgt):
 def ask(text, src, tgt):
     body = json.dumps({
         "messages": [{"role": "user", "content": prompt(text, src, tgt)}],
-        "temperature": 0, "max_tokens": 200,
+        "temperature": 0, "max_tokens": 300,
+        "chat_template_kwargs": {"enable_thinking": False},
     }).encode()
     req = urllib.request.Request(URL, body, {"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=600) as r:
         j = json.load(r)
-    return j["choices"][0]["message"]["content"].strip(), j.get("usage", {}).get("completion_tokens", 0)
+    m = j["choices"][0]["message"]
+    out = (m.get("content") or "").strip() or "[EMPTY; reasoning: " + (m.get("reasoning_content") or "")[:200] + "]"
+    return out, j.get("usage", {}).get("completion_tokens", 0)
 
 
 for src, tgt, items in [("fi", "ru", FI), ("ru", "fi", RU)]:
