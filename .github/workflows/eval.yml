@@ -127,7 +127,7 @@ jobs:
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: 17
+          java-version: 21
       - name: Smart translator exactly as in the app (LiteRT-LM + Gemma 4 E2B)
         run: |
           set -o pipefail

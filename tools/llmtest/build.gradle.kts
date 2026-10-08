@@ -6,7 +6,7 @@ plugins {
 }
 
 kotlin {
-    jvmToolchain(17)
+    jvmToolchain(21)
     sourceSets["main"].kotlin.srcDir("../../mobile/src/main/java/com/sarmat/perevodchik/phone/llmshared")
     compilerOptions { freeCompilerArgs.add("-Xskip-metadata-version-check") }
 }
